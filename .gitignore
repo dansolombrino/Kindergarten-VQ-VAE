@@ -161,3 +161,6 @@ cython_debug/
 
 # Raw or pre-processed data
 data/
+
+# References
+references/
