@@ -164,3 +164,6 @@ data/
 
 # References
 references/
+
+# WandB
+wandb/
