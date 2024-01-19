@@ -9,6 +9,9 @@ from transformers import EncoderDecoderModel
 
 from VectorQuantizer import VectorQuantizer
 
+from consts import *
+
+from models.utils import *
 
 
 class Bagon(nn.Module):
@@ -41,14 +44,73 @@ class Bagon(nn.Module):
 
         return vq_loss, reconstructed_logits
     
-    def get_num_trainable_parameters(self):
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    def model_params_summary_dict(self):
+        return {
+            "encoder": {
+                "n_trainable_params": n_trainable_params(self.encoder),
+                "n_not_trainable_params": n_not_trainable_params(self.encoder),
+                "n_params": n_params(self.encoder)
+            },
+            
+            "vector_quantizer": {
+                "n_trainable_params": n_trainable_params(self.vector_quantizer),
+                "n_not_trainable_params": n_not_trainable_params(self.vector_quantizer),
+                "n_params": n_params(self.vector_quantizer)
+            },
+            
+            "decoder": {
+                "n_trainable_params": n_trainable_params(self.decoder),
+                "n_not_trainable_params": n_not_trainable_params(self.decoder),
+                "n_params": n_params(self.decoder)
+            }
+        }
+
     
-    def get_num_not_trainable_parameters(self):
-        return sum(p.numel() for p in self.parameters() if not p.requires_grad)
+    def model_params_summary_print(self):
+
+        print_module_params_summary(
+            self.encoder, "Encoder", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
+        )
+        
+        print_module_params_summary(
+            self.vector_quantizer, "Vector Quantizer", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
+        )
+        
+        print_module_params_summary(
+            self.decoder, "Decoder", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
+        )
+        
+        return
     
-    def get_num_parameters(self):
-        return sum(p.numel() for p in self.parameters())
+    def set_mode(self, model_mode: str):
+        if model_mode == "full":
+            return
+        
+        if model_mode == "dec-cls-head-ft":
+            # Layers composing BERT classification head, in Huggingface implementation:
+            # - decoder.cls.predictions.transform.dense 
+            # - decoder.cls.predictions.decoder
+
+            # NOT possible to freeze every param except the ones in the desired layers
+            # So, we first freeze the BERT encoder and the BERT decoder
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            
+            for param in self.decoder.parameters():
+                param.requires_grad = False
+
+            # (Vector Quantizer parameters are kept trainable!)
+            
+            # Then, we unfreeze the parameters of the layers we're interested in
+            for p in self.decoder.cls.predictions.transform.dense.parameters():
+                p.requires_grad = True
+
+            for p in self.decoder.cls.predictions.decoder.parameters():
+                p.requires_grad = True
+
+            return
+        
+        raise ValueError(f"Invalid model mode {model_mode}, please use \"full\" or \"dec-cls-head-ft\"")
 
     
 

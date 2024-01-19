@@ -55,6 +55,10 @@ VQ_BETA = 0.69
 
 DECODER_MODEL_NAME = "bert-base-uncased"
 
+#            full --> train all model parameters
+# dec-cls-head-ft --> fine-tune BERT decoder classification head
+MODEL_MODE = "dec-cls-head-ft"
+
 ### Model ###
 
 ### Optimizer ###
@@ -69,8 +73,8 @@ WANDB_PROJECT_NAME = "Kindergarten-VQ-VAE"
 WANDB_GROUP = "Bagon"
 WANDB_JOB_TYPE = "code-testing"
 
-# WANDB_MODE = "disabled"
-WANDB_MODE = "online"
+WANDB_MODE = "disabled"
+# WANDB_MODE = "online"
 
 WANDB_WATCH_MODEL = True
 

@@ -46,6 +46,8 @@ def main():
         vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
         decoder_model_name=DECODER_MODEL_NAME
     ).to(device)
+    model.set_mode(MODEL_MODE)
+    model.model_params_summary_print()
 
     tokenizer_name = "bert-base-uncased"
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
@@ -72,9 +74,7 @@ def main():
     run_conf = get_config()
     run_conf.update(
         {
-            "n_trainable_parameters": model.get_num_trainable_parameters(),
-            "n_not_trainable_parameters": model.get_num_not_trainable_parameters(),
-            "n_parameters": model.get_num_parameters(),
+            "n_params": model.model_params_summary_dict(), 
             "optimizer": str(opt)
         }
     )

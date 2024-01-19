@@ -131,11 +131,6 @@ def train(
     wandb_run: Run
 ):
     
-    print(f"Trainable params: [bold {COLOR_TRAIN}]{model.get_num_trainable_parameters()}[/bold {COLOR_TRAIN}]")
-    print(f"   Frozen params: [bold {COLOR_FROZEN}]{model.get_num_not_trainable_parameters()}[/bold {COLOR_FROZEN}]")
-    print(f"      Tot params: [bold {COLOR_TOT}]{model.get_num_parameters()}[/bold {COLOR_TOT}]")
-    print()
-    
     prg.start()
     epochs_task = prg.add_task(f"[bold {COLOR_EPOCH}] Epochs", total=n_epochs)
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
