@@ -1,5 +1,7 @@
 rich
 numpy
 torch
+torchmetrics
 transformers # NOTE evaluate at the end of the project whether Hugging Face is needed or not! 
 sentencepiece # NOTE evaluate at the end of the project whether Hugging Face is needed or not! 
+dotmap
