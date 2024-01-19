@@ -34,6 +34,8 @@ from torch import no_grad
 
 from consts import *
 
+from wandb.wandb_run import Run
+
 
 def step(
     device: device,
@@ -125,7 +127,8 @@ def train(
     opt: Optimizer,
     n_epochs: int, 
     vocab_size: int,
-    loss_recon_rescale_factor: float
+    loss_recon_rescale_factor: float,
+    wandb_run: Run
 ):
     
     print(f"Trainable params: [bold {COLOR_TRAIN}]{model.get_num_trainable_parameters()}[/bold {COLOR_TRAIN}]")
@@ -194,6 +197,15 @@ def train(
             
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_batches_train)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
+        wandb_run.log(
+            {
+                "epoch": epoch,
+                "train/loss_vq": stats_train_run.loss_vq_run,
+                "train/loss_recon": stats_train_run.loss_recon_run,
+                "train/loss_full": stats_train_run.loss_full_run,
+                "train/acc": stats_train_run.metric_acc_run
+            }
+        )
 
         ### End training part ### 
         
@@ -230,10 +242,17 @@ def train(
             
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_batches_val)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != (n_epochs - 1))
+        wandb_run.log(
+            {
+                "epoch": epoch,
+                "val/loss_vq": stats_val_run.loss_vq_run,
+                "val/loss_recon": stats_val_run.loss_recon_run,
+                "val/loss_full": stats_val_run.loss_full_run,
+                "val/acc": stats_val_run.metric_acc_run
+            }
+        )
 
         ### End validating part ### 
-
-    
 
     ### End epochs loop ###
         
@@ -246,7 +265,8 @@ def test(
     model: Bagon, tokenizer: PreTrainedTokenizer,
     vocab_size: int,
     loss_recon_rescale_factor: float,
-    epoch: int
+    epoch: int,
+    wandb_run: Run
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
@@ -291,6 +311,15 @@ def test(
         
     stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_batches_test)
     end_of_epoch_print(stats_test_run, stats_test_best, console, epoch, False, COLOR_TEST, STATS_EMOJI_TEST, True)
+    wandb_run.log(
+        {
+            "epoch": epoch,
+            "test/loss_vq": stats_test_run.loss_vq_run,
+            "test/loss_recon": stats_test_run.loss_recon_run,
+            "test/loss_full": stats_test_run.loss_full_run,
+            "test/acc": stats_test_run.metric_acc_run
+        }
+    )
 
     ### End testing part ###
 

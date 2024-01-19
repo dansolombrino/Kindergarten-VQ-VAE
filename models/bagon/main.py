@@ -17,6 +17,8 @@ from rich.style import Style
 
 from rich.console import Console
 
+import wandb
+
 from Trainer import train, test
 
 
@@ -67,6 +69,24 @@ def main():
         console=console
     )
     
+    run_conf = get_config()
+    run_conf.update(
+        {
+            "n_trainable_parameters": model.get_num_trainable_parameters(),
+            "n_not_trainable_parameters": model.get_num_not_trainable_parameters(),
+            "n_parameters": model.get_num_parameters(),
+            "optimizer": str(opt)
+        }
+    )
+    import os
+    os.environ["WANDB_SILENT"] = "true"
+    wandb_run = wandb.init(
+        project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
+        config=run_conf, mode=WANDB_MODE
+    )
+    if WANDB_WATCH_MODEL:
+        wandb_run.watch(model, log='all')
+    
     n_batches_train = int(len(dl_train) * LIM_BATCHES_TRAIN_PCT)
     n_batches_val   = int(len(dl_val  ) * LIM_BATCHES_VAL_PCT)
     train(
@@ -77,7 +97,8 @@ def main():
         opt=opt,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR
+        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
+        wandb_run=wandb_run
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
     test(
@@ -88,7 +109,8 @@ def main():
         vocab_size=VOCAB_SIZE,
         loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
         # TODO NOTE handle this in case of resuming from checkpoint!
-        epoch=N_EPOCHS - 1
+        epoch=N_EPOCHS - 1,
+        wandb_run=wandb_run
     )
     
 

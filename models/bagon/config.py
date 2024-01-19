@@ -1,3 +1,24 @@
+TO_EXCLUDE = [
+    # this list 
+    "TO_EXCLUDE"
+] 
+
+def exclude_arg(k, v):
+    return k.endswith("__") or k.startswith("__") or callable(v) or k in TO_EXCLUDE
+
+def get_config():
+    
+    config = globals()
+    train_conf = {}
+
+    for k, v in config.items():
+
+        if not exclude_arg(k, v): 
+            
+            train_conf[k.lower()] = v if v is not None else "None"
+
+    return train_conf
+
 ### Dataset ###
 
 from math import isclose
@@ -42,11 +63,24 @@ DECODER_MODEL_NAME = "bert-base-uncased"
 
 ### Optimizer ###
 
+### Weights and Biases ###
+
+WANDB_PROJECT_NAME = "Kindergarten-VQ-VAE"
+WANDB_GROUP = "Bagon"
+WANDB_JOB_TYPE = "code-testing"
+
+# WANDB_MODE = "disabled"
+WANDB_MODE = "online"
+
+WANDB_WATCH_MODEL = True
+
+### Weights and Biases ###
+
 ### Training ###
 
-LIM_BATCHES_TRAIN_PCT = 0.005
-LIM_BATCHES_VAL_PCT   = 0.025
-LIM_BATCHES_TEST_PCT  = 0.025
+LIM_BATCHES_TRAIN_PCT = 0.01
+LIM_BATCHES_VAL_PCT   = 0.01
+LIM_BATCHES_TEST_PCT  = 0.01
 
 N_EPOCHS = 2
 
