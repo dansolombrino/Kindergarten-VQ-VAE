@@ -1,6 +1,8 @@
 TO_EXCLUDE = [
     # this list 
-    "TO_EXCLUDE"
+    "TO_EXCLUDE",
+
+    "LIM_BATCHES_PCT",
 ] 
 
 def exclude_arg(k, v):
@@ -51,13 +53,13 @@ ENCODER_MODEL_NAME = "bert-base-uncased"
 
 VQ_N_E = 9 # dSentences has 9 generative factors!
 VQ_E_DIM = 768
-VQ_BETA = 0.69
+VQ_BETA = 0.1
 
 DECODER_MODEL_NAME = "bert-base-uncased"
 
 #            full --> train all model parameters
-# dec-cls-head-ft --> fine-tune BERT decoder classification head
-MODEL_MODE = "dec-cls-head-ft"
+# dec-head-ft --> fine-tune BERT decoder classification head
+MODEL_MODE = "dec-head-ft"
 
 ### Model ###
 
@@ -82,12 +84,13 @@ WANDB_WATCH_MODEL = True
 
 ### Training ###
 
-LIM_BATCHES_TRAIN_PCT = 0.01
-LIM_BATCHES_VAL_PCT   = 0.01
-LIM_BATCHES_TEST_PCT  = 0.01
+LIM_BATCHES_PCT = 0.25
+LIM_BATCHES_TRAIN_PCT = LIM_BATCHES_PCT
+LIM_BATCHES_VAL_PCT   = LIM_BATCHES_PCT
+LIM_BATCHES_TEST_PCT  = LIM_BATCHES_PCT
 
-N_EPOCHS = 2
+N_EPOCHS = 15
 
-LOSS_RECON_RESCALE_FACTOR = 1
+LOSS_RECON_RESCALE_FACTOR = 1e3
 
 ### Training ###

@@ -13,6 +13,8 @@ from consts import *
 
 from models.utils import *
 
+SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
+
 
 class Bagon(nn.Module):
     def __init__(
@@ -86,7 +88,7 @@ class Bagon(nn.Module):
         if model_mode == "full":
             return
         
-        if model_mode == "dec-cls-head-ft":
+        if model_mode == "dec-head-ft":
             # Layers composing BERT classification head, in Huggingface implementation:
             # - decoder.cls.predictions.transform.dense 
             # - decoder.cls.predictions.decoder
@@ -110,7 +112,7 @@ class Bagon(nn.Module):
 
             return
         
-        raise ValueError(f"Invalid model mode {model_mode}, please use \"full\" or \"dec-cls-head-ft\"")
+        raise ValueError(f"Invalid model mode {model_mode}, please use one of the following: {', '.join(SUPPORTED_MODEL_MODES)}")
 
     
 

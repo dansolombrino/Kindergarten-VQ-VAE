@@ -46,6 +46,7 @@ def main():
         vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
         decoder_model_name=DECODER_MODEL_NAME
     ).to(device)
+    model.compile()
     model.set_mode(MODEL_MODE)
     model.model_params_summary_print()
 
