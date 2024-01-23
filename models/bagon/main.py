@@ -12,6 +12,8 @@ from transformers import BertTokenizer
 
 from torch.optim.adam import Adam
 
+from torch.optim.lr_scheduler import MultiStepLR
+
 from rich.progress import *
 from rich.style import Style
 
@@ -54,6 +56,7 @@ def main():
     VOCAB_SIZE = 30522
 
     opt = Adam(params=model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, amsgrad=AMSGRAD)
+    lr_sched = MultiStepLR(optimizer=opt, milestones=MILESTONES, gamma=GAMMA)
 
     console = Console()
     prg = Progress(
@@ -94,7 +97,7 @@ def main():
         device=device, 
         dl_train=dl_train, dl_val=dl_val, n_batches_train=n_batches_train, n_batches_val=n_batches_val,
         model=model, tokenizer=tokenizer,
-        opt=opt,
+        opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
         loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,

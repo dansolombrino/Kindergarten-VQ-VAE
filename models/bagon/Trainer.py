@@ -14,6 +14,8 @@ from transformers import PreTrainedTokenizer
 
 from torch.optim.optimizer import Optimizer
 
+from torch.optim.lr_scheduler import LRScheduler
+
 from torch import Tensor
 
 from torch.nn.functional import one_hot
@@ -39,20 +41,27 @@ from wandb.wandb_run import Run
 
 def step(
     device: device,
-    model: Bagon, tokenizer: PreTrainedTokenizer, opt: Optimizer,
+    model: Bagon, tokenizer: PreTrainedTokenizer, 
+    opt: Optimizer, 
+    lr_sched: LRScheduler,
     batch: list, vocab_size: int,
     loss_recon_rescale_factor: float, multi_class_acc: MulticlassAccuracy,
     console: Console
 
 ):
-    tokenized = tokenizer(batch, return_tensors="pt", padding=True)
+    # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
+    # TODO NOTE or improve its handling even if dSentences will be the only dataset used
+    tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
     logits_recon: Tensor = model.forward(input_ids, attention_mask)
 
-    input_ids_one_hot = one_hot(input_ids, vocab_size).float()
-    loss_recon_step = loss_recon_rescale_factor * cross_entropy(input=logits_recon, target=input_ids_one_hot)
+    # input and targets reshaped to use cross-entropy with sequential data, 
+    # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
+    loss_recon_step = loss_recon_rescale_factor * cross_entropy(
+        input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
+    )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
     metric_acc_step = multi_class_acc(recon_ids, input_ids)
@@ -65,6 +74,9 @@ def step(
         opt.zero_grad()
         loss_full_step.backward()
         opt.step()
+
+        if lr_sched is not None:
+            lr_sched.step()
 
     return DotMap(
         loss_recon_step=loss_recon_step, 
@@ -103,13 +115,13 @@ def end_of_epoch_print(
     print_new_line: bool
 ):
     epoch_str = f"[bold {COLOR_EPOCH}]{epoch:03d}[/bold {COLOR_EPOCH}] | " if print_epoch else "    | "
-    suffix = "\n" if print_new_line else ""
+    suffix_str = "\n" if print_new_line else ""
 
     console.print(
         epoch_str  + \
         f"loss_recon: [bold {stat_color}] {stats_train_run.loss_recon_run:02.6f}[/bold {stat_color}] {stat_emojis[1] if stats_train_best.loss_recon_is_best else '  '} | " + \
         f"acc: [bold {stat_color}]{stats_train_run.metric_acc_run:02.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_train_best.metric_acc_is_best else '  '} | " + \
-        suffix
+        suffix_str
     )
 
 
@@ -118,7 +130,7 @@ def train(
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
     model: Bagon, tokenizer: PreTrainedTokenizer,
-    opt: Optimizer,
+    opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
     loss_recon_rescale_factor: float,
@@ -170,7 +182,9 @@ def train(
 
             stats_step: DotMap = step(
                 device=device,
-                model=model, tokenizer=tokenizer, opt=opt,
+                model=model, tokenizer=tokenizer, 
+                opt=opt, 
+                lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
                 loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
@@ -188,6 +202,7 @@ def train(
         wandb_run.log(
             {
                 "epoch": epoch,
+                "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else -69,
                 "train/loss_recon": stats_train_run.loss_recon_run,
                 "train/loss_full": stats_train_run.loss_full_run,
                 "train/acc": stats_train_run.metric_acc_run
@@ -217,7 +232,9 @@ def train(
 
                 stats_step: DotMap = step(
                     device=device,
-                    model=model, tokenizer=tokenizer, opt=None,
+                    model=model, tokenizer=tokenizer, 
+                    opt=None, 
+                    lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
                     loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                     console=console
@@ -288,7 +305,9 @@ def test(
 
             stats_step: DotMap = step(
                 device=device,
-                model=model, tokenizer=tokenizer, opt=None,
+                model=model, tokenizer=tokenizer, 
+                opt=None, 
+                lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
                 loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
