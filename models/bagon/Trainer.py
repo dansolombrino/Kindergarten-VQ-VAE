@@ -202,7 +202,7 @@ def train(
         wandb_run.log(
             {
                 "epoch": epoch,
-                "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else -69,
+                "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else opt.param_groups[0]['lr'],
                 "train/loss_recon": stats_train_run.loss_recon_run,
                 "train/loss_full": stats_train_run.loss_full_run,
                 "train/acc": stats_train_run.metric_acc_run

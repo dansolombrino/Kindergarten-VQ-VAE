@@ -56,7 +56,10 @@ def main():
     VOCAB_SIZE = 30522
 
     opt = Adam(params=model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, amsgrad=AMSGRAD)
-    lr_sched = MultiStepLR(optimizer=opt, milestones=MILESTONES, gamma=GAMMA)
+    if LR_SCHEDULER == "MultiStepLR":
+        lr_sched = MultiStepLR(optimizer=opt, milestones=MILESTONES, gamma=GAMMA)
+    else:
+        lr_sched = None
 
     console = Console()
     prg = Progress(
