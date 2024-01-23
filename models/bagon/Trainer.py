@@ -23,6 +23,7 @@ from torch.nn.functional import one_hot
 from torch.nn.functional import cross_entropy
 
 from torchmetrics.classification import MulticlassAccuracy
+from metrics import seq_acc
 
 from torch.nn.functional import softmax
 
@@ -64,7 +65,9 @@ def step(
     )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step = multi_class_acc(recon_ids, input_ids)
+
+    # metric_acc_step = multi_class_acc(recon_ids, input_ids)
+    metric_acc_step = seq_acc(recon_ids, input_ids)
 
     loss_full_step: Tensor = loss_recon_step
 
@@ -119,8 +122,8 @@ def end_of_epoch_print(
 
     console.print(
         epoch_str  + \
-        f"loss_recon: [bold {stat_color}] {stats_train_run.loss_recon_run:02.6f}[/bold {stat_color}] {stat_emojis[1] if stats_train_best.loss_recon_is_best else '  '} | " + \
-        f"acc: [bold {stat_color}]{stats_train_run.metric_acc_run:02.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_train_best.metric_acc_is_best else '  '} | " + \
+        f"loss_recon: [bold {stat_color}] {stats_train_run.loss_recon_run:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_train_best.loss_recon_is_best else '  '} | " + \
+        f"acc: [bold {stat_color}]{stats_train_run.metric_acc_run:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_train_best.metric_acc_is_best else '  '} | " + \
         suffix_str
     )
 
