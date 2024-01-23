@@ -43,7 +43,6 @@ def main():
     logging.set_verbosity(40)
     model = Bagon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
         decoder_model_name=DECODER_MODEL_NAME
     ).to(device)
     model.compile()
@@ -54,7 +53,7 @@ def main():
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
     VOCAB_SIZE = 30522
 
-    opt = Adam(params=model.parameters())
+    opt = Adam(params=model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, amsgrad=AMSGRAD)
 
     console = Console()
     prg = Progress(
@@ -80,7 +79,7 @@ def main():
         }
     )
     import os
-    os.environ["WANDB_SILENT"] = "true"
+    os.environ["WANDB_SILENT"] = WANDB_SILENT
     wandb_run = wandb.init(
         project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
         config=run_conf, mode=WANDB_MODE

@@ -51,10 +51,6 @@ PIN_MEMORY = True
 
 ENCODER_MODEL_NAME = "bert-base-uncased"
 
-VQ_N_E = 9 # dSentences has 9 generative factors!
-VQ_E_DIM = 768
-VQ_BETA = 0.1
-
 DECODER_MODEL_NAME = "bert-base-uncased"
 
 #            full --> train all model parameters
@@ -65,7 +61,11 @@ MODEL_MODE = "dec-head-ft"
 
 ### Optimizer ###
 
+LR = 1e-5
 
+WEIGHT_DECAY = False
+
+AMSGRAD = False
 
 ### Optimizer ###
 
@@ -73,18 +73,20 @@ MODEL_MODE = "dec-head-ft"
 
 WANDB_PROJECT_NAME = "Kindergarten-VQ-VAE"
 WANDB_GROUP = "Bagon"
-WANDB_JOB_TYPE = "code-testing"
+WANDB_JOB_TYPE = "hyperparameter-fine-tuning"
 
 WANDB_MODE = "disabled"
 # WANDB_MODE = "online"
 
 WANDB_WATCH_MODEL = True
 
+WANDB_SILENT = "false"
+
 ### Weights and Biases ###
 
 ### Training ###
 
-LIM_BATCHES_PCT = 0.25
+LIM_BATCHES_PCT = 0.1
 LIM_BATCHES_TRAIN_PCT = LIM_BATCHES_PCT
 LIM_BATCHES_VAL_PCT   = LIM_BATCHES_PCT
 LIM_BATCHES_TEST_PCT  = LIM_BATCHES_PCT

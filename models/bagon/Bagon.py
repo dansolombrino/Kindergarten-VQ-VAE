@@ -7,8 +7,6 @@ from torch.nn.functional import softmax
 
 from transformers import EncoderDecoderModel
 
-from VectorQuantizer import VectorQuantizer
-
 from consts import *
 
 from models.utils import *
@@ -18,8 +16,8 @@ SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
 
 class Bagon(nn.Module):
     def __init__(
-        self, encoder_model_name: str, 
-        vq_n_e: int, vq_e_dim: int, vq_beta: float,
+        self, 
+        encoder_model_name: str, 
         decoder_model_name: str
     ):
         super(Bagon, self).__init__()
@@ -27,24 +25,18 @@ class Bagon(nn.Module):
         encoder_decoder_model: EncoderDecoderModel = EncoderDecoderModel.from_encoder_decoder_pretrained(encoder_model_name, decoder_model_name)
 
         self.encoder = encoder_decoder_model.encoder
-        
-        self.vector_quantizer = VectorQuantizer(n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta)
-        
+    
         self.decoder = encoder_decoder_model.decoder
 
         
 
-    def forward(self, input_ids, device):
+    def forward(self, input_ids, attention_mask):
         
-        embeds = self.encoder(input_ids).last_hidden_state
+        embeds = self.encoder(input_ids, attention_mask=attention_mask).last_hidden_state
 
-        assert embeds.shape[-1] == self.vector_quantizer.e_dim, "embedding dim of encoder output must match e_dim (for now)!"
+        reconstructed_logits = self.decoder(inputs_embeds=embeds).logits
 
-        vq_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantizer(embeds, device)
-
-        reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
-
-        return vq_loss, reconstructed_logits
+        return reconstructed_logits
     
     def model_params_summary_dict(self):
         return {
@@ -52,12 +44,6 @@ class Bagon(nn.Module):
                 "n_trainable_params": n_trainable_params(self.encoder),
                 "n_not_trainable_params": n_not_trainable_params(self.encoder),
                 "n_params": n_params(self.encoder)
-            },
-            
-            "vector_quantizer": {
-                "n_trainable_params": n_trainable_params(self.vector_quantizer),
-                "n_not_trainable_params": n_not_trainable_params(self.vector_quantizer),
-                "n_params": n_params(self.vector_quantizer)
             },
             
             "decoder": {
@@ -72,10 +58,6 @@ class Bagon(nn.Module):
 
         print_module_params_summary(
             self.encoder, "Encoder", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
-        )
-        
-        print_module_params_summary(
-            self.vector_quantizer, "Vector Quantizer", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
         )
         
         print_module_params_summary(
