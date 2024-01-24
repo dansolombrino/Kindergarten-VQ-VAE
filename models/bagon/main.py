@@ -51,7 +51,7 @@ def main():
     model.set_mode(MODEL_MODE)
     model.model_params_summary_print()
 
-    tokenizer_name = "bert-base-uncased"
+    tokenizer_name = TOKENIZER_NAME
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
     VOCAB_SIZE = 30522
 
