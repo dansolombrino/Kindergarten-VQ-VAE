@@ -54,7 +54,8 @@ def step(
 ):
     # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
     # TODO NOTE or improve its handling even if dSentences will be the only dataset used
-    tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
+    # tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
+    tokenized = tokenizer(batch, return_tensors="pt", padding=True)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
