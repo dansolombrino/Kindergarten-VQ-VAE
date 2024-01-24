@@ -95,23 +95,23 @@ def end_of_step_stats_update(stats_stage_run: DotMap, stats_step: DotMap, n_els_
     
     return stats_stage_run
 
-def end_of_epoch_stats_update(stats_stage_run: DotMap, stats_train_best: DotMap, n_els_epoch: int):
+def end_of_epoch_stats_update(stats_stage_run: DotMap, stats_stage_best: DotMap, n_els_epoch: int):
 
     stats_stage_run.loss_recon_run /= n_els_epoch
     stats_stage_run.loss_full_run /= n_els_epoch
     stats_stage_run.metric_acc_run /= n_els_epoch
 
-    stats_train_best.loss_recon_is_best = stats_stage_run.loss_recon_run < stats_train_best.loss_recon_best
-    stats_train_best.loss_recon_best = stats_stage_run.loss_recon_run if stats_train_best.loss_recon_is_best else stats_train_best.loss_recon_best
-    stats_train_best.loss_full_is_best = stats_stage_run.loss_full_run < stats_train_best.loss_full_best
-    stats_train_best.loss_full_best = stats_stage_run.loss_full_run if stats_train_best.loss_full_is_best else stats_train_best.loss_full_best
-    stats_train_best.metric_acc_is_best = stats_stage_run.metric_acc_run > stats_train_best.metric_acc_best
-    stats_train_best.metric_acc_best = stats_stage_run.metric_acc_run if stats_train_best.metric_acc_is_best else stats_train_best.metric_acc_best
+    stats_stage_best.loss_recon_is_best = stats_stage_run.loss_recon_run < stats_stage_best.loss_recon_best
+    stats_stage_best.loss_recon_best = stats_stage_run.loss_recon_run if stats_stage_best.loss_recon_is_best else stats_stage_best.loss_recon_best
+    stats_stage_best.loss_full_is_best = stats_stage_run.loss_full_run < stats_stage_best.loss_full_best
+    stats_stage_best.loss_full_best = stats_stage_run.loss_full_run if stats_stage_best.loss_full_is_best else stats_stage_best.loss_full_best
+    stats_stage_best.metric_acc_is_best = stats_stage_run.metric_acc_run > stats_stage_best.metric_acc_best
+    stats_stage_best.metric_acc_best = stats_stage_run.metric_acc_run if stats_stage_best.metric_acc_is_best else stats_stage_best.metric_acc_best
 
-    return stats_stage_run, stats_train_best
+    return stats_stage_run, stats_stage_best
 
 def end_of_epoch_print(
-    stats_train_run: DotMap, stats_train_best: DotMap, 
+    stats_stage_run: DotMap, stats_stage_best: DotMap, 
     console: Console, 
     epoch: int, print_epoch: bool,
     stat_color: str, stat_emojis: list,
@@ -122,8 +122,8 @@ def end_of_epoch_print(
 
     console.print(
         epoch_str  + \
-        f"loss_recon: [bold {stat_color}] {stats_train_run.loss_recon_run:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_train_best.loss_recon_is_best else '  '} | " + \
-        f"acc: [bold {stat_color}]{stats_train_run.metric_acc_run:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_train_best.metric_acc_is_best else '  '} | " + \
+        f"loss_recon: [bold {stat_color}] {stats_stage_run.loss_recon_run:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best.loss_recon_is_best else '  '} | " + \
+        f"acc: [bold {stat_color}]{stats_stage_run.metric_acc_run:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best.metric_acc_is_best else '  '} | " + \
         suffix_str
     )
 
