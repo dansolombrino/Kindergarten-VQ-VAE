@@ -92,6 +92,8 @@ def main():
     )
     if WANDB_WATCH_MODEL:
         wandb_run.watch(model, log='all')
+    if WANDB_LOG_CODE:
+        wandb.run.log_code(".")
     
     n_batches_train = int(len(dl_train) * LIM_BATCHES_TRAIN_PCT)
     n_batches_val   = int(len(dl_val  ) * LIM_BATCHES_VAL_PCT)
