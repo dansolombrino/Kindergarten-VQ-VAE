@@ -31,8 +31,6 @@ from torch.nn.functional import log_softmax
 
 from torch import argmax
 
-from dotmap import DotMap
-
 import numpy as np
 
 from torch import no_grad
@@ -81,37 +79,37 @@ def step(
         if lr_sched is not None:
             lr_sched.step()
 
-    return DotMap(
-        loss_recon_step=loss_recon_step, 
-        loss_full_step=loss_full_step, 
-        metric_acc_step=metric_acc_step
-    )
+    return {
+        "loss_recon_step": loss_recon_step, 
+        "loss_full_step": loss_full_step, 
+        "metric_acc_step": metric_acc_step
+    }
 
-def end_of_step_stats_update(stats_stage_run: DotMap, stats_step: DotMap, n_els_batch: int):
+def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
-    stats_stage_run.loss_recon_run += stats_step.loss_recon_step * n_els_batch
-    stats_stage_run.loss_full_run += stats_step.loss_full_step * n_els_batch
-    stats_stage_run.metric_acc_run += stats_step.metric_acc_step * n_els_batch * 1e2
+    stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
+    stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
+    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
     
     return stats_stage_run
 
-def end_of_epoch_stats_update(stats_stage_run: DotMap, stats_stage_best: DotMap, n_els_epoch: int):
+def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int):
 
-    stats_stage_run.loss_recon_run /= n_els_epoch
-    stats_stage_run.loss_full_run /= n_els_epoch
-    stats_stage_run.metric_acc_run /= n_els_epoch
+    stats_stage_run["loss_recon_run"] /= n_els_epoch
+    stats_stage_run["loss_full_run"] /= n_els_epoch
+    stats_stage_run["metric_acc_run"] /= n_els_epoch
 
-    stats_stage_best.loss_recon_is_best = stats_stage_run.loss_recon_run < stats_stage_best.loss_recon_best
-    stats_stage_best.loss_recon_best = stats_stage_run.loss_recon_run if stats_stage_best.loss_recon_is_best else stats_stage_best.loss_recon_best
-    stats_stage_best.loss_full_is_best = stats_stage_run.loss_full_run < stats_stage_best.loss_full_best
-    stats_stage_best.loss_full_best = stats_stage_run.loss_full_run if stats_stage_best.loss_full_is_best else stats_stage_best.loss_full_best
-    stats_stage_best.metric_acc_is_best = stats_stage_run.metric_acc_run > stats_stage_best.metric_acc_best
-    stats_stage_best.metric_acc_best = stats_stage_run.metric_acc_run if stats_stage_best.metric_acc_is_best else stats_stage_best.metric_acc_best
+    stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
+    stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
+    stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
+    stats_stage_best["metric_acc_best"] = stats_stage_run["metric_acc_run"] if stats_stage_best["metric_acc_is_best"] else stats_stage_best["metric_acc_best"]
 
     return stats_stage_run, stats_stage_best
 
 def end_of_epoch_print(
-    stats_stage_run: DotMap, stats_stage_best: DotMap, 
+    stats_stage_run: dict, stats_stage_best: dict, 
     console: Console, 
     epoch: int, print_epoch: bool,
     stat_color: str, stat_emojis: list,
@@ -122,8 +120,8 @@ def end_of_epoch_print(
 
     console.print(
         epoch_str  + \
-        f"loss_recon: [bold {stat_color}] {stats_stage_run.loss_recon_run:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best.loss_recon_is_best else '  '} | " + \
-        f"acc: [bold {stat_color}]{stats_stage_run.metric_acc_run:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best.metric_acc_is_best else '  '} | " + \
+        f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
+        f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
         suffix_str
     )
 
@@ -144,19 +142,22 @@ def train(
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
     batches_task_val   = prg.add_task(f"[bold {COLOR_VAL}] Val   batches", total=n_batches_val)
 
-    stats_train_best = DotMap(
-        loss_recon_best = np.Inf,
-        loss_recon_is_best = False,
-        loss_full_best = np.Inf,
-        loss_full_is_best = False,
-        metric_acc_best = 0,
-        metric_acc_is_best = False
-    )
-    stats_val_best = DotMap(
-        loss_recon_best = np.Inf,
-        loss_full_best = np.Inf,
-        metric_acc_best = 0
-    )
+    stats_train_best = {
+        "loss_recon_best": np.Inf,
+        "loss_recon_is_best": False,
+        "loss_full_best": np.Inf,
+        "loss_full_is_best": False,
+        "metric_acc_best": 0,
+        "metric_acc_is_best": False
+    }
+    stats_val_best = {
+        "loss_recon_best": np.Inf,
+        "loss_recon_is_best": False,
+        "loss_full_best": np.Inf,
+        "loss_full_is_best": False,
+        "metric_acc_best": 0,
+        "metric_acc_is_best": False
+    }
 
     ### Begin epochs loop ###
 
@@ -167,11 +168,11 @@ def train(
 
         ### Begin trainining part ### 
         
-        stats_train_run = DotMap(
-            loss_recon_run = 0,
-            loss_full_run = 0,
-            metric_acc_run = 0
-        )
+        stats_train_run = {
+            "loss_recon_run": 0,
+            "loss_full_run": 0,
+            "metric_acc_run": 0
+        }
         n_els_epoch = 0
         model.train()
 
@@ -181,7 +182,7 @@ def train(
             n_els_batch = len(batch)
             n_els_epoch += n_els_batch
 
-            stats_step: DotMap = step(
+            stats_step: dict = step(
                 device=device,
                 model=model, tokenizer=tokenizer, 
                 opt=opt, 
@@ -203,9 +204,9 @@ def train(
             {
                 "epoch": epoch,
                 "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else opt.param_groups[0]['lr'],
-                "train/loss_recon": stats_train_run.loss_recon_run,
-                "train/loss_full": stats_train_run.loss_full_run,
-                "train/acc": stats_train_run.metric_acc_run
+                "train/loss_recon": stats_train_run["loss_recon_run"],
+                "train/loss_full": stats_train_run["loss_full_run"],
+                "train/acc": stats_train_run["metric_acc_run"]
             }
         )
 
@@ -213,11 +214,11 @@ def train(
         
         ### Beging validating part ### 
 
-        stats_val_run = DotMap(
-            loss_recon_run = 0,
-            loss_full_run = 0,
-            metric_acc_run = 0
-        )
+        stats_val_run = {
+            "loss_recon_run": 0,
+            "loss_full_run": 0,
+            "metric_acc_run": 0
+        }
         n_els_epoch = 0
         model.eval()    
 
@@ -230,7 +231,7 @@ def train(
 
             with no_grad():
 
-                stats_step: DotMap = step(
+                stats_step: dict = step(
                     device=device,
                     model=model, tokenizer=tokenizer, 
                     opt=None, 
@@ -251,9 +252,9 @@ def train(
         wandb_run.log(
             {
                 "epoch": epoch,
-                "val/loss_recon": stats_val_run.loss_recon_run,
-                "val/loss_full": stats_val_run.loss_full_run,
-                "val/acc": stats_val_run.metric_acc_run
+                "val/loss_recon": stats_val_run["loss_recon_run"],
+                "val/loss_full": stats_val_run["loss_full_run"],
+                "val/acc": stats_val_run["metric_acc_run"]
             }
         )
 
@@ -274,19 +275,22 @@ def test(
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
-    stats_test_best = DotMap(
-        loss_recon_best = np.Inf,
-        loss_full_best = np.Inf,
-        metric_acc_best = 0
-    )
+    stats_test_best = {
+        "loss_recon_best": np.Inf,
+        "loss_recon_is_best": False,
+        "loss_full_best": np.Inf,
+        "loss_full_is_best": False,
+        "metric_acc_best": 0,
+        "metric_acc_is_best": False
+    }
     
     ### Beging testing part ### 
 
-    stats_test_run = DotMap(
-        loss_recon_run = 0,
-        loss_full_run = 0,
-        metric_acc_run = 0
-    )
+    stats_test_run = {
+        "loss_recon_run": 0,
+        "loss_full_run": 0,
+        "metric_acc_run": 0
+    }
     n_els_epoch = 0
     model.eval()    
 
@@ -299,7 +303,7 @@ def test(
 
         with no_grad():
 
-            stats_step: DotMap = step(
+            stats_step: dict = step(
                 device=device,
                 model=model, tokenizer=tokenizer, 
                 opt=None, 
@@ -319,9 +323,9 @@ def test(
     wandb_run.log(
         {
             "epoch": epoch,
-            "test/loss_recon": stats_test_run.loss_recon_run,
-            "test/loss_full": stats_test_run.loss_full_run,
-            "test/acc": stats_test_run.metric_acc_run
+            "test/loss_recon": stats_test_run["loss_recon_run"],
+            "test/loss_full": stats_test_run["loss_full_run"],
+            "test/acc": stats_test_run["metric_acc_run"]
         }
     )
 
