@@ -48,7 +48,6 @@ def step(
     opt: Optimizer, 
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
-    loss_recon_rescale_factor: float, multi_class_acc: MulticlassAccuracy,
     console: Console
 
 ):
@@ -74,7 +73,6 @@ def step(
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
 
-    # metric_acc_step = multi_class_acc(recon_ids, input_ids)
     metric_acc_step = seq_acc(recon_ids, input_ids)
 
     loss_full_step: Tensor = loss_recon_step
@@ -144,7 +142,6 @@ def train(
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
-    loss_recon_rescale_factor: float,
     wandb_run: Run
 ):
     
@@ -153,7 +150,6 @@ def train(
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
     batches_task_val   = prg.add_task(f"[bold {COLOR_VAL}] Val   batches", total=n_batches_val)
 
-    multi_class_acc = MulticlassAccuracy(num_classes=vocab_size).to(device)
     stats_train_best = DotMap(
         loss_recon_best = np.Inf,
         loss_recon_is_best = False,
@@ -197,7 +193,6 @@ def train(
                 opt=opt, 
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
-                loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
             )
 
@@ -247,7 +242,6 @@ def train(
                     opt=None, 
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
-                    loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                     console=console
                 )
             
@@ -281,19 +275,11 @@ def test(
     dl_test: DataLoader, n_batches_test,
     model: Bagon, tokenizer: PreTrainedTokenizer,
     vocab_size: int,
-    loss_recon_rescale_factor: float,
     epoch: int,
     wandb_run: Run
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
-    
-    multi_class_acc = MulticlassAccuracy(num_classes=vocab_size).to(device)
-    stats_test_best = DotMap(
-        loss_recon_best = np.Inf,
-        loss_full_best = np.Inf,
-        metric_acc_best = 0
-    )
     
     ### Beging testing part ### 
 
@@ -320,7 +306,6 @@ def test(
                 opt=None, 
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
-                loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
             )
         
