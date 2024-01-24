@@ -103,7 +103,6 @@ def main():
         opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
         wandb_run=wandb_run
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
@@ -113,7 +112,6 @@ def main():
         dl_test=dl_test, n_batches_test=n_batches_test,
         model=model, tokenizer=tokenizer,
         vocab_size=VOCAB_SIZE,
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
         # TODO NOTE handle this in case of resuming from checkpoint!
         epoch=N_EPOCHS - 1,
         wandb_run=wandb_run
