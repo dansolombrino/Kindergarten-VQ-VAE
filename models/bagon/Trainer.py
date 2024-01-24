@@ -21,11 +21,13 @@ from torch import Tensor
 from torch.nn.functional import one_hot
 
 from torch.nn.functional import cross_entropy
+from torch.nn.functional import kl_div
 
 from torchmetrics.classification import MulticlassAccuracy
 from metrics import seq_acc
 
 from torch.nn.functional import softmax
+from torch.nn.functional import log_softmax
 
 from torch import argmax
 
@@ -60,8 +62,13 @@ def step(
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
-    loss_recon_step = loss_recon_rescale_factor * cross_entropy(
-        input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
+    # loss_recon_step = cross_entropy(
+    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
+    #     # input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
+    # )
+    loss_recon_step = kl_div(
+        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
+        target=one_hot(input_ids, vocab_size).float().reshape(-1, vocab_size)
     )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
