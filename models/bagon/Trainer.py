@@ -63,8 +63,8 @@ def step(
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
     loss_recon_step = cross_entropy(
-        input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
-        # input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
+        # input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
+        input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
     )
     # loss_recon_step = kl_div(
     #     input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
@@ -93,28 +93,28 @@ def step(
         metric_acc_step=metric_acc_step
     )
 
-def end_of_step_stats_update(stats_train_run: DotMap, stats_step: DotMap, n_els_batch: int):
+def end_of_step_stats_update(stats_stage_run: DotMap, stats_step: DotMap, n_els_batch: int):
     
-    stats_train_run.loss_recon_run += stats_step.loss_recon_step * n_els_batch
-    stats_train_run.loss_full_run += stats_step.loss_full_step * n_els_batch
-    stats_train_run.metric_acc_run += stats_step.metric_acc_step * n_els_batch * 1e2
+    stats_stage_run.loss_recon_run += stats_step.loss_recon_step * n_els_batch
+    stats_stage_run.loss_full_run += stats_step.loss_full_step * n_els_batch
+    stats_stage_run.metric_acc_run += stats_step.metric_acc_step * n_els_batch * 1e2
     
-    return stats_train_run
+    return stats_stage_run
 
-def end_of_epoch_stats_update(stats_train_run: DotMap, stats_train_best: DotMap, n_els_epoch: int):
+def end_of_epoch_stats_update(stats_stage_run: DotMap, stats_train_best: DotMap, n_els_epoch: int):
 
-    stats_train_run.loss_recon_run /= n_els_epoch
-    stats_train_run.loss_full_run /= n_els_epoch
-    stats_train_run.metric_acc_run /= n_els_epoch
+    stats_stage_run.loss_recon_run /= n_els_epoch
+    stats_stage_run.loss_full_run /= n_els_epoch
+    stats_stage_run.metric_acc_run /= n_els_epoch
 
-    stats_train_best.loss_recon_is_best = stats_train_run.loss_recon_run < stats_train_best.loss_recon_best
-    stats_train_best.loss_recon_best = stats_train_run.loss_recon_run if stats_train_best.loss_recon_is_best else stats_train_best.loss_recon_best
-    stats_train_best.loss_full_is_best = stats_train_run.loss_full_run < stats_train_best.loss_full_best
-    stats_train_best.loss_full_best = stats_train_run.loss_full_run if stats_train_best.loss_full_is_best else stats_train_best.loss_full_best
-    stats_train_best.metric_acc_is_best = stats_train_run.metric_acc_run > stats_train_best.metric_acc_best
-    stats_train_best.metric_acc_best = stats_train_run.metric_acc_run if stats_train_best.metric_acc_is_best else stats_train_best.metric_acc_best
+    stats_train_best.loss_recon_is_best = stats_stage_run.loss_recon_run < stats_train_best.loss_recon_best
+    stats_train_best.loss_recon_best = stats_stage_run.loss_recon_run if stats_train_best.loss_recon_is_best else stats_train_best.loss_recon_best
+    stats_train_best.loss_full_is_best = stats_stage_run.loss_full_run < stats_train_best.loss_full_best
+    stats_train_best.loss_full_best = stats_stage_run.loss_full_run if stats_train_best.loss_full_is_best else stats_train_best.loss_full_best
+    stats_train_best.metric_acc_is_best = stats_stage_run.metric_acc_run > stats_train_best.metric_acc_best
+    stats_train_best.metric_acc_best = stats_stage_run.metric_acc_run if stats_train_best.metric_acc_is_best else stats_train_best.metric_acc_best
 
-    return stats_train_run, stats_train_best
+    return stats_stage_run, stats_train_best
 
 def end_of_epoch_print(
     stats_train_run: DotMap, stats_train_best: DotMap, 
@@ -280,6 +280,11 @@ def test(
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
+    stats_test_best = DotMap(
+        loss_recon_best = np.Inf,
+        loss_full_best = np.Inf,
+        metric_acc_best = 0
+    )
     
     ### Beging testing part ### 
 
