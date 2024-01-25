@@ -60,14 +60,12 @@ def step(
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
-    # loss_recon_step = cross_entropy(
-    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1), ignore_index=0
-    # )
-    loss_recon_step = kl_div(
-        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
-        target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
-        reduction="batchmean"
     )
+    # loss_recon_step = kl_div(
+    #     input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
+    #     target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
+    #     reduction="batchmean"
+    # )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
     metric_acc_step = seq_acc(recon_ids, input_ids)
