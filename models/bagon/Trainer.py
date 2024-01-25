@@ -39,6 +39,7 @@ from consts import *
 
 from wandb.wandb_run import Run
 
+from utils import count_pct_padding_tokens
 
 def step(
     device: device,
@@ -87,7 +88,8 @@ def step(
     return {
         "loss_recon_step": loss_recon_step, 
         "loss_full_step": loss_full_step, 
-        "metric_acc_step": metric_acc_step
+        "metric_acc_step": metric_acc_step,
+        "padding_tokens_pct_step": count_pct_padding_tokens(input_ids, console)
     }
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
@@ -95,14 +97,16 @@ def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batc
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
     stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
+    stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
     
     return stats_stage_run
 
-def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int):
+def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int, n_steps: int):
 
     stats_stage_run["loss_recon_run"] /= n_els_epoch
     stats_stage_run["loss_full_run"] /= n_els_epoch
     stats_stage_run["metric_acc_run"] /= n_els_epoch
+    stats_stage_run["padding_tokens_pct_run"] /= n_steps
 
     stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
     stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
@@ -176,9 +180,11 @@ def train(
         stats_train_run = {
             "loss_recon_run": 0,
             "loss_full_run": 0,
-            "metric_acc_run": 0
+            "metric_acc_run": 0,
+            "padding_tokens_pct_run": 0
         }
         n_els_epoch = 0
+        n_steps = 0
         model.train()
 
         ### Begin train batches loop ### 
@@ -186,8 +192,9 @@ def train(
         for batch in list(dl_train)[:n_batches_train]:
             n_els_batch = len(batch)
             n_els_epoch += n_els_batch
+            n_steps += 1
 
-            stats_step: dict = step(
+            stats_step = step(
                 device=device,
                 model=model, tokenizer=tokenizer, 
                 opt=opt, 
@@ -203,7 +210,7 @@ def train(
 
         ### End train batches loop ### 
             
-        stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch)
+        stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
         wandb_run.log(
             {
@@ -211,7 +218,8 @@ def train(
                 "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else opt.param_groups[0]['lr'],
                 "train/loss_recon": stats_train_run["loss_recon_run"],
                 "train/loss_full": stats_train_run["loss_full_run"],
-                "train/acc": stats_train_run["metric_acc_run"]
+                "train/acc": stats_train_run["metric_acc_run"],
+                "padding_tokens_pct/train": stats_train_run["padding_tokens_pct_run"]
             }
         )
 
@@ -222,9 +230,11 @@ def train(
         stats_val_run = {
             "loss_recon_run": 0,
             "loss_full_run": 0,
-            "metric_acc_run": 0
+            "metric_acc_run": 0,
+            "padding_tokens_pct_run": 0
         }
         n_els_epoch = 0
+        n_steps = 0
         model.eval()    
 
         ### Begin val batches loop ### 
@@ -233,10 +243,11 @@ def train(
 
             n_els_batch = len(batch)
             n_els_epoch += n_els_batch
+            n_steps += 1
 
             with no_grad():
 
-                stats_step: dict = step(
+                stats_step = step(
                     device=device,
                     model=model, tokenizer=tokenizer, 
                     opt=None, 
@@ -252,14 +263,16 @@ def train(
 
         ### End val batches loop ### 
             
-        stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch)
+        stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != (n_epochs - 1))
         wandb_run.log(
             {
                 "epoch": epoch,
                 "val/loss_recon": stats_val_run["loss_recon_run"],
                 "val/loss_full": stats_val_run["loss_full_run"],
-                "val/acc": stats_val_run["metric_acc_run"]
+                "val/acc": stats_val_run["metric_acc_run"],
+                "padding_tokens_pct/val": stats_val_run["padding_tokens_pct_run"]
+
             }
         )
 
@@ -294,9 +307,11 @@ def test(
     stats_test_run = {
         "loss_recon_run": 0,
         "loss_full_run": 0,
-        "metric_acc_run": 0
+        "metric_acc_run": 0,
+        "padding_tokens_pct_run": 0
     }
     n_els_epoch = 0
+    n_steps = 0
     model.eval()    
 
     ### Begin val batches loop ### 
@@ -305,10 +320,11 @@ def test(
 
         n_els_batch = len(batch)
         n_els_epoch += n_els_batch
+        n_steps += 1
 
         with no_grad():
 
-            stats_step: dict = step(
+            stats_step = step(
                 device=device,
                 model=model, tokenizer=tokenizer, 
                 opt=None, 
@@ -323,14 +339,15 @@ def test(
 
     ### End test batches loop ### 
         
-    stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_els_epoch)
+    stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_els_epoch, n_steps)
     end_of_epoch_print(stats_test_run, stats_test_best, console, epoch, False, COLOR_TEST, STATS_EMOJI_TEST, True)
     wandb_run.log(
         {
             "epoch": epoch,
             "test/loss_recon": stats_test_run["loss_recon_run"],
             "test/loss_full": stats_test_run["loss_full_run"],
-            "test/acc": stats_test_run["metric_acc_run"]
+            "test/acc": stats_test_run["metric_acc_run"],
+            "padding_tokens_pct/test": stats_test_run["padding_tokens_pct_run"]
         }
     )
 
