@@ -134,6 +134,23 @@ def end_of_epoch_print(
         suffix_str
     )
 
+def init_stats_best(): 
+    return {
+        "loss_recon_best": np.Inf,
+        "loss_recon_is_best": False,
+        "loss_full_best": np.Inf,
+        "loss_full_is_best": False,
+        "metric_acc_best": 0,
+        "metric_acc_is_best": False
+    }
+
+def init_stats_run(): 
+    return {
+        "loss_recon_run": 0,
+        "loss_full_run": 0,
+        "metric_acc_run": 0,
+        "padding_tokens_pct_run": 0
+    }
 
 def train(
     prg: Progress, console: Console,
@@ -151,22 +168,8 @@ def train(
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
     batches_task_val   = prg.add_task(f"[bold {COLOR_VAL}] Val   batches", total=n_batches_val)
 
-    stats_train_best = {
-        "loss_recon_best": np.Inf,
-        "loss_recon_is_best": False,
-        "loss_full_best": np.Inf,
-        "loss_full_is_best": False,
-        "metric_acc_best": 0,
-        "metric_acc_is_best": False
-    }
-    stats_val_best = {
-        "loss_recon_best": np.Inf,
-        "loss_recon_is_best": False,
-        "loss_full_best": np.Inf,
-        "loss_full_is_best": False,
-        "metric_acc_best": 0,
-        "metric_acc_is_best": False
-    }
+    stats_train_best = init_stats_best()
+    stats_val_best   = init_stats_best()
 
     ### Begin epochs loop ###
 
@@ -177,12 +180,7 @@ def train(
 
         ### Begin trainining part ### 
         
-        stats_train_run = {
-            "loss_recon_run": 0,
-            "loss_full_run": 0,
-            "metric_acc_run": 0,
-            "padding_tokens_pct_run": 0
-        }
+        stats_train_run = init_stats_run()
         n_els_epoch = 0
         n_steps = 0
         model.train()
@@ -227,12 +225,7 @@ def train(
         
         ### Beging validating part ### 
 
-        stats_val_run = {
-            "loss_recon_run": 0,
-            "loss_full_run": 0,
-            "metric_acc_run": 0,
-            "padding_tokens_pct_run": 0
-        }
+        stats_val_run = init_stats_run()
         n_els_epoch = 0
         n_steps = 0
         model.eval()    
@@ -293,23 +286,11 @@ def test(
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
-    stats_test_best = {
-        "loss_recon_best": np.Inf,
-        "loss_recon_is_best": False,
-        "loss_full_best": np.Inf,
-        "loss_full_is_best": False,
-        "metric_acc_best": 0,
-        "metric_acc_is_best": False
-    }
+    stats_test_best = init_stats_best()
     
     ### Beging testing part ### 
 
-    stats_test_run = {
-        "loss_recon_run": 0,
-        "loss_full_run": 0,
-        "metric_acc_run": 0,
-        "padding_tokens_pct_run": 0
-    }
+    stats_test_run = init_stats_run()
     n_els_epoch = 0
     n_steps = 0
     model.eval()    
