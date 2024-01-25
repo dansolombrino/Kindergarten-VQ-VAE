@@ -39,7 +39,24 @@ from consts import *
 
 from wandb.wandb_run import Run
 
-from utils import count_pct_padding_tokens
+def count_pct_padding_tokens(input_ids: Tensor, console: Console):
+
+    mask = input_ids == 0
+    # console.print(mask)
+    # console.print(mask.shape)
+    num_pad_tokens = mask.sum(dim=-1)
+    # console.print(num_pad_tokens)
+    # console.print(num_pad_tokens.shape)
+
+    pct_pad_tokens = num_pad_tokens / mask.shape[-1] * 100
+    # console.print(pct_pad_tokens)
+    # console.print(pct_pad_tokens.shape)
+
+    mean_pct_pad_tokens = pct_pad_tokens.mean()
+    # console.print(mean_pct_pad_tokens)
+    # console.print(mean_pct_pad_tokens.shape)
+
+    return mean_pct_pad_tokens.item()
 
 def step(
     device: device,

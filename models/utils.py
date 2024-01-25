@@ -26,22 +26,4 @@ def print_module_params_summary(
     print(f"      Tot params: [bold {color_tot}]{n_params(module):9d}[/bold {color_tot}]")
     print()
 
-def count_pct_padding_tokens(input_ids: Tensor, console: Console):
-
-    mask = input_ids == 0
-    # console.print(mask)
-    # console.print(mask.shape)
-    num_pad_tokens = mask.sum(dim=-1)
-    # console.print(num_pad_tokens)
-    # console.print(num_pad_tokens.shape)
-
-    pct_pad_tokens = num_pad_tokens / mask.shape[-1] * 100
-    # console.print(pct_pad_tokens)
-    # console.print(pct_pad_tokens.shape)
-
-    mean_pct_pad_tokens = pct_pad_tokens.mean()
-    # console.print(mean_pct_pad_tokens)
-    # console.print(mean_pct_pad_tokens.shape)
-
-    return mean_pct_pad_tokens.item()
 
