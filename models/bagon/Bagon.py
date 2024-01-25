@@ -34,7 +34,8 @@ class Bagon(nn.Module):
         
         embeds = self.encoder(input_ids, attention_mask=attention_mask).last_hidden_state
 
-        reconstructed_logits = self.decoder(inputs_embeds=embeds).logits
+        # reconstructed_logits = self.decoder(inputs_embeds=embeds).logits
+        reconstructed_logits = self.decoder(encoder_hidden_states=embeds, input_ids=input_ids, attention_mask=attention_mask).logits
 
         return reconstructed_logits
     
