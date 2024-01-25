@@ -169,6 +169,15 @@ def init_stats_run():
         "padding_tokens_pct_run": 0
     }
 
+def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
+    return {
+        "epoch": epoch,
+        f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
+        f"{stage}/loss_full": stats_stage_run["loss_full_run"],
+        f"{stage}/acc": stats_stage_run["metric_acc_run"],
+        f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
+    } 
+
 def train(
     prg: Progress, console: Console,
     device: device, 
@@ -227,16 +236,7 @@ def train(
             
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
-        wandb_run.log(
-            {
-                "epoch": epoch,
-                "lr": lr_sched.get_last_lr()[0] if lr_sched is not None else opt.param_groups[0]['lr'],
-                "train/loss_recon": stats_train_run["loss_recon_run"],
-                "train/loss_full": stats_train_run["loss_full_run"],
-                "train/acc": stats_train_run["metric_acc_run"],
-                "padding_tokens_pct/train": stats_train_run["padding_tokens_pct_run"]
-            }
-        )
+        wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
 
         ### End training part ### 
         
@@ -275,16 +275,7 @@ def train(
             
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != (n_epochs - 1))
-        wandb_run.log(
-            {
-                "epoch": epoch,
-                "val/loss_recon": stats_val_run["loss_recon_run"],
-                "val/loss_full": stats_val_run["loss_full_run"],
-                "val/acc": stats_val_run["metric_acc_run"],
-                "padding_tokens_pct/val": stats_val_run["padding_tokens_pct_run"]
-
-            }
-        )
+        wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
 
         ### End validating part ### 
 
@@ -339,15 +330,7 @@ def test(
         
     stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_els_epoch, n_steps)
     end_of_epoch_print(stats_test_run, stats_test_best, console, epoch, False, COLOR_TEST, STATS_EMOJI_TEST, True)
-    wandb_run.log(
-        {
-            "epoch": epoch,
-            "test/loss_recon": stats_test_run["loss_recon_run"],
-            "test/loss_full": stats_test_run["loss_full_run"],
-            "test/acc": stats_test_run["metric_acc_run"],
-            "padding_tokens_pct/test": stats_test_run["padding_tokens_pct_run"]
-        }
-    )
+    wandb_run.log(create_wandb_log_dict(epoch, stats_test_run, "test"))
 
     ### End testing part ###
 
