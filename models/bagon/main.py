@@ -122,8 +122,6 @@ def main():
         vocab_size=VOCAB_SIZE,
         wandb_run=wandb_run, run_path=run_path
     )
-    decoded_sentences_df = pd.DataFrame(decoded_sentences)
-    decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
     model_best_val_checkpoint = torch.load(f"{run_path}/bagon_ckpt_loss_recon_val_best.pth")
     model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
@@ -139,6 +137,8 @@ def main():
         epoch=N_EPOCHS,
         wandb_run=wandb_run
     )
+    decoded_sentences_df = pd.DataFrame(decoded_sentences)
+    decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     
 
     return
