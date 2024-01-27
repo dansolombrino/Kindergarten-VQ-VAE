@@ -208,7 +208,9 @@ def decode_sentences(
 def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
     save(
             {
-                "model_state_dict": model.state_dict()
+                "model_state_dict": model.state_dict(),
+                "encoder_state_dict": model.encoder.state_dict(),
+                "decoder_state_dict": model.decoder.state_dict()
             }, 
             checkpoint_file_path
             
