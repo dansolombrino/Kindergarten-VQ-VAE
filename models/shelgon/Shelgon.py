@@ -15,28 +15,37 @@ from common.model_utils import *
 
 from models.bagon.Bagon import Bagon
 
-SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
+from typing import Union
+
+from transformers import PreTrainedModel
+
+SUPPORTED_MODEL_MODES = ["full", "dec-head-ft", "vq-ft"]
 
 
 class Shelgon(Bagon):
     def __init__(
         self, encoder_model_name: str, 
         vq_n_e: int, vq_e_dim: int, vq_beta: float,
-        decoder_model_name: str
+        decoder_model_name: str,
+        from_pretrained_bagon: Union[str, None]
     ):
-        super(Shelgon, self).__init__()
-
-        encoder_decoder_model: EncoderDecoderModel = EncoderDecoderModel.from_encoder_decoder_pretrained(encoder_model_name, decoder_model_name)
-
-        self.encoder = encoder_decoder_model.encoder
+        # self.encoder and self.decoder are inherited from Bagon!
+        super(Shelgon, self).__init__(
+            encoder_model_name=encoder_model_name, 
+            decoder_model_name=decoder_model_name
+        )
         
-        self.vector_quantizer = VectorQuantizer(n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta)
+        self.vector_quantizer: VectorQuantizer = VectorQuantizer(n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta)
         
-        self.decoder = encoder_decoder_model.decoder
+        if from_pretrained_bagon is not None:
+            bagon_checkpoint = torch.load(from_pretrained_bagon)
+
+            self.encoder.load_state_dict(bagon_checkpoint["encoder_state_dict"])
+            self.decoder.load_state_dict(bagon_checkpoint["decoder_state_dict"])
 
         
 
-    def forward(self, input_ids, device, attention_mask):
+    def forward(self, input_ids, attention_mask, device):
         
         embeds = self.encoder(input_ids, attention_mask=attention_mask).last_hidden_state
 
@@ -115,6 +124,16 @@ class Shelgon(Bagon):
 
             return
         
+        if model_mode == "vq-ft":
+            # we want to just fine-tune the vector quantization NN --> gotta freeze encoder and decoder
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            
+            for param in self.decoder.parameters():
+                param.requires_grad = False
+
+            return
+        
         raise ValueError(f"Invalid model mode {model_mode}, please use one of the following: {', '.join(SUPPORTED_MODEL_MODES)}")
 
     
@@ -130,13 +149,20 @@ def main():
 
     from transformers import BertTokenizer
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     encoder_model_name = "bert-base-uncased"
     vq_n_e = 10
     vq_e_dim = 768
     vq_beta = 0.69
     decoder_model_name = "bert-base-uncased"
 
-    model = Shelgon(encoder_model_name, vq_n_e, vq_e_dim, vq_beta, decoder_model_name)
+    model = Shelgon(
+        encoder_model_name, 
+        vq_n_e, vq_e_dim, vq_beta, 
+        decoder_model_name,
+        from_pretrained_bagon="./runs/Bagon/2024_01_27_18_31_27/bagon_ckpt_loss_recon_val_best.pth"
+    ).to(device)
 
     tokenizer_name = "bert-base-uncased"
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
@@ -147,19 +173,15 @@ def main():
         "I am totally ready for this great adventure"
     ]
     
-    text_input_ids = tokenizer(text, return_tensors="pt", padding=True).input_ids
+    tokenized = tokenizer(text, return_tensors="pt", padding=True, add_special_tokens=False)
+    input_ids: Tensor = tokenized.input_ids.to(device)
+    attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    text_reconstructed_ids = model.forward(text_input_ids)
+    vq_loss, recon_ids = model.forward(input_ids, attention_mask, device)
 
-    for i, (a, b, c) in enumerate(zip(text_input_ids, text_reconstructed_ids, text)):
-        print(f"sentence id: {i}")
-        print(f"input_ids: {a}")
-        print(f"reconstructed_ids: {b}")
-
-        print(f"text: {c}")
-        print(f"text_reconstructed: {' '.join(tokenizer.convert_ids_to_tokens(b.squeeze(0)))}")
-        
-        print("\n\n")
+    print(recon_ids, recon_ids.shape)
+    print()
+    print(vq_loss)
 
 
 
