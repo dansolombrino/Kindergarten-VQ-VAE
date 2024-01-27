@@ -44,7 +44,8 @@ class Shelgon(Bagon):
 
         vq_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantizer(embeds, device)
 
-        reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
+        # reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
+        reconstructed_logits = self.decoder(encoder_hidden_states=z_q, input_ids=input_ids, attention_mask=attention_mask).logits
 
         return vq_loss, reconstructed_logits
     
