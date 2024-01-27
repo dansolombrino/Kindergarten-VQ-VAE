@@ -125,6 +125,8 @@ def main():
     decoded_sentences_df = pd.DataFrame(decoded_sentences)
     decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
+    model_best_val_checkpoint = torch.load(f"{run_path}/bagon_ckpt_loss_recon_val_best.pth")
+    model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
     test(
         prg=prg, console=console,
         device=device,
@@ -134,7 +136,7 @@ def main():
         decoded_sentences=decoded_sentences,
         vocab_size=VOCAB_SIZE,
         # TODO NOTE handle this in case of resuming from checkpoint!
-        epoch=N_EPOCHS - 1,
+        epoch=N_EPOCHS,
         wandb_run=wandb_run
     )
     

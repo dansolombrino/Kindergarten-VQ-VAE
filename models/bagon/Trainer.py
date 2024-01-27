@@ -39,6 +39,8 @@ from consts import *
 
 from wandb.wandb_run import Run
 
+from torch import save
+
 def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
     mask = input_ids == 0
@@ -203,6 +205,24 @@ def decode_sentences(
 
     return 
 
+def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
+    save(
+            {
+                "model_state_dict": model.state_dict()
+            }, 
+            checkpoint_file_path
+            
+        )
+
+def checkpoint(stats_train_best: dict, model: Bagon, checkpoint_dir: str, stage: str):
+    
+    if stats_train_best["loss_recon_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_loss_recon_{stage}_best.pth", stage)
+    
+    if stats_train_best["metric_acc_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_metric_acc_{stage}_best.pth", stage)
+
+
 def train(
     prg: Progress, console: Console,
     device: device, 
@@ -268,6 +288,7 @@ def train(
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
         wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
+        checkpoint(stats_train_best, model, run_path, "train")
 
         ### End training part ### 
         
@@ -311,6 +332,7 @@ def train(
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != n_epochs)
         wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
+        checkpoint(stats_train_best, model, run_path, "val")
 
         ### End validating part ### 
 
