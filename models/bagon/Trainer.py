@@ -60,7 +60,7 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Bagon, tokenizer: PreTrainedTokenizer, 
+    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     opt: Optimizer, 
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
@@ -70,7 +70,7 @@ def step(
     # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
     # TODO NOTE or improve its handling even if dSentences will be the only dataset used
     # tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
-    tokenized = tokenizer(batch, return_tensors="pt", padding=True)
+    tokenized = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
@@ -107,7 +107,7 @@ def step(
         "loss_full_step": loss_full_step, 
         "metric_acc_step": metric_acc_step,
         "padding_tokens_pct_step": count_pct_padding_tokens(input_ids, console)
-    }
+    }, input_ids, recon_ids
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
@@ -178,11 +178,28 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
     } 
 
+def decode_sentences(input_ids, recon_ids, tokenizer: PreTrainedTokenizer, console: Console):
+
+    from tokenizers import decoders
+
+    # unfortunately, convert_ids_to_tokens does NOT support batched inputs :(
+    for x, y in zip(input_ids, recon_ids):
+        x_decoded = tokenizer.convert_ids_to_tokens(x)
+        y_decoded = tokenizer.convert_ids_to_tokens(y)
+
+        console.print(f"original sentence: {' '.join(x_decoded)}")
+        console.print(f"recon    sentence: {' '.join(y_decoded)}")
+        console.print("\n")
+
+    return 
+
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Bagon, tokenizer: PreTrainedTokenizer,
+    model: Bagon, 
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
+    n_epochs_to_decode_after: int,
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
@@ -218,14 +235,17 @@ def train(
             n_els_epoch += n_els_batch
             n_steps += 1
 
-            stats_step = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
-                model=model, tokenizer=tokenizer, 
+                model=model, 
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=opt, 
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
                 console=console
             )
+
+            # decode_sentences(input_ids, recon_ids, tokenizer, console)
 
             stats_train_run = end_of_step_stats_update(stats_train_run, stats_step, n_els_batch)
             
@@ -257,9 +277,10 @@ def train(
 
             with no_grad():
 
-                stats_step = step(
+                stats_step, _, _ = step(
                     device=device,
-                    model=model, tokenizer=tokenizer, 
+                    model=model,
+                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                     opt=None, 
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
@@ -287,7 +308,7 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, tokenizer: PreTrainedTokenizer,
+    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     vocab_size: int,
     epoch: int,
     wandb_run: Run
@@ -313,9 +334,10 @@ def test(
 
         with no_grad():
 
-            stats_step = step(
+            stats_step, _, _ = step(
                 device=device,
-                model=model, tokenizer=tokenizer, 
+                model=model,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=None, 
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
