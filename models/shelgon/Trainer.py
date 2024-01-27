@@ -14,19 +14,22 @@ from transformers import PreTrainedTokenizer
 
 from torch.optim.optimizer import Optimizer
 
+from torch.optim.lr_scheduler import LRScheduler
+
 from torch import Tensor
 
 from torch.nn.functional import one_hot
 
 from torch.nn.functional import cross_entropy
+from torch.nn.functional import kl_div
 
 from torchmetrics.classification import MulticlassAccuracy
+from metrics import seq_acc
 
 from torch.nn.functional import softmax
+from torch.nn.functional import log_softmax
 
 from torch import argmax
-
-from dotmap import DotMap
 
 import numpy as np
 
@@ -36,31 +39,60 @@ from consts import *
 
 from wandb.wandb_run import Run
 
+from torch import save
+
+def count_pct_padding_tokens(input_ids: Tensor, console: Console):
+
+    mask = input_ids == 0
+    # console.print(mask)
+    # console.print(mask.shape)
+    num_pad_tokens = mask.sum(dim=-1)
+    # console.print(num_pad_tokens)
+    # console.print(num_pad_tokens.shape)
+
+    pct_pad_tokens = num_pad_tokens / mask.shape[-1] * 100
+    # console.print(pct_pad_tokens)
+    # console.print(pct_pad_tokens.shape)
+
+    mean_pct_pad_tokens = pct_pad_tokens.mean()
+    # console.print(mean_pct_pad_tokens)
+    # console.print(mean_pct_pad_tokens.shape)
+
+    return mean_pct_pad_tokens.item()
 
 def step(
     device: device,
-    model: Bagon, tokenizer: PreTrainedTokenizer, opt: Optimizer,
+    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    opt: Optimizer, 
+    lr_sched: LRScheduler,
     batch: list, vocab_size: int,
-    loss_recon_rescale_factor: float, multi_class_acc: MulticlassAccuracy,
     console: Console
 
 ):
-    # input_ids: Tensor = tokenizer(batch, return_tensors="pt", padding=True).input_ids.to(device)
-    tokenized = tokenizer(batch, return_tensors="pt", padding=True)
+    # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
+    # TODO NOTE or improve its handling even if dSentences will be the only dataset used
+    # tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
+    tokenized = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    loss_vq_step: Tensor
-    logits_recon: Tensor
-    loss_vq_step, logits_recon = model.forward(input_ids, attention_mask)
+    logits_recon: Tensor = model.forward(input_ids, attention_mask)
 
-    input_ids_one_hot = one_hot(input_ids, vocab_size).float()
-    loss_recon_step = loss_recon_rescale_factor * cross_entropy(input=logits_recon, target=input_ids_one_hot)
+    # input and targets reshaped to use cross-entropy with sequential data, 
+    # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
+    # loss_recon_step = cross_entropy(
+    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
+    # )
+    loss_recon_step = kl_div(
+        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
+        target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
+        reduction="batchmean"
+    )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step = multi_class_acc(recon_ids, input_ids)
+    metric_acc_step = seq_acc(recon_ids, input_ids)
 
-    loss_full_step: Tensor = loss_vq_step + loss_recon_step
+    loss_full_step: Tensor = loss_recon_step
 
     # passing opt  --> training time
     # passing None --> inference time
@@ -69,69 +101,139 @@ def step(
         loss_full_step.backward()
         opt.step()
 
-    return DotMap(
-        loss_vq_step=loss_vq_step, 
-        loss_recon_step=loss_recon_step, 
-        loss_full_step=loss_full_step, 
-        metric_acc_step=metric_acc_step
-    )
+        if lr_sched is not None:
+            lr_sched.step()
 
-def end_of_step_stats_update(stats_train_run: DotMap, stats_step: DotMap, n_els_batch: int):
+    return {
+        "loss_recon_step": loss_recon_step, 
+        "loss_full_step": loss_full_step, 
+        "metric_acc_step": metric_acc_step,
+        "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
+    }, input_ids, recon_ids
+
+def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
-    stats_train_run.loss_vq_run += stats_step.loss_vq_step * n_els_batch
-    stats_train_run.loss_recon_run += stats_step.loss_recon_step * n_els_batch
-    stats_train_run.loss_full_run += stats_step.loss_full_step * n_els_batch
-    stats_train_run.metric_acc_run += stats_step.metric_acc_step * n_els_batch * 1e2
+    stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
+    stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
+    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
+    stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
     
-    return stats_train_run
+    return stats_stage_run
 
-def end_of_epoch_stats_update(stats_train_run: DotMap, stats_train_best: DotMap, n_els_epoch: int):
+def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int, n_steps: int):
 
-    stats_train_run.loss_vq_run /= n_els_epoch
-    stats_train_run.loss_recon_run /= n_els_epoch
-    stats_train_run.loss_full_run /= n_els_epoch
-    stats_train_run.metric_acc_run /= n_els_epoch
+    stats_stage_run["loss_recon_run"] /= n_els_epoch
+    stats_stage_run["loss_full_run"] /= n_els_epoch
+    stats_stage_run["metric_acc_run"] /= n_els_epoch
+    stats_stage_run["padding_tokens_pct_run"] /= n_steps
 
-    stats_train_best.loss_vq_is_best = stats_train_run.loss_vq_run < stats_train_best.loss_vq_best
-    stats_train_best.loss_vq_best = stats_train_run.loss_vq_run if stats_train_best.loss_vq_is_best else stats_train_best.loss_vq_best
-    stats_train_best.loss_recon_is_best = stats_train_run.loss_recon_run < stats_train_best.loss_recon_best
-    stats_train_best.loss_recon_best = stats_train_run.loss_recon_run if stats_train_best.loss_recon_is_best else stats_train_best.loss_recon_best
-    stats_train_best.loss_full_is_best = stats_train_run.loss_full_run < stats_train_best.loss_full_best
-    stats_train_best.loss_full_best = stats_train_run.loss_full_run if stats_train_best.loss_full_is_best else stats_train_best.loss_full_best
-    stats_train_best.metric_acc_is_best = stats_train_run.metric_acc_run > stats_train_best.metric_acc_best
-    stats_train_best.metric_acc_best = stats_train_run.metric_acc_run if stats_train_best.metric_acc_is_best else stats_train_best.metric_acc_best
+    stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
+    stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
+    stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
+    stats_stage_best["metric_acc_best"] = stats_stage_run["metric_acc_run"] if stats_stage_best["metric_acc_is_best"] else stats_stage_best["metric_acc_best"]
 
-    return stats_train_run, stats_train_best
+    return stats_stage_run, stats_stage_best
 
 def end_of_epoch_print(
-    stats_train_run: DotMap, stats_train_best: DotMap, 
+    stats_stage_run: dict, stats_stage_best: dict, 
     console: Console, 
     epoch: int, print_epoch: bool,
     stat_color: str, stat_emojis: list,
     print_new_line: bool
 ):
     epoch_str = f"[bold {COLOR_EPOCH}]{epoch:03d}[/bold {COLOR_EPOCH}] | " if print_epoch else "    | "
-    suffix = "\n" if print_new_line else ""
+    suffix_str = "\n" if print_new_line else ""
 
     console.print(
         epoch_str  + \
-        f"loss_vq: [bold {stat_color}] {stats_train_run.loss_vq_run:02.6f}[/bold {stat_color}] {stat_emojis[0] if stats_train_best.loss_vq_is_best else '  '} | " + \
-        f"loss_recon: [bold {stat_color}] {stats_train_run.loss_recon_run:02.6f}[/bold {stat_color}] {stat_emojis[1] if stats_train_best.loss_recon_is_best else '  '} | " + \
-        f"acc: [bold {stat_color}]{stats_train_run.metric_acc_run:02.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_train_best.metric_acc_is_best else '  '} | " + \
-        suffix
+        f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
+        f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
+        suffix_str
     )
+
+def init_stats_best(): 
+    return {
+        "loss_recon_best": np.Inf,
+        "loss_recon_is_best": False,
+        "loss_full_best": np.Inf,
+        "loss_full_is_best": False,
+        "metric_acc_best": 0,
+        "metric_acc_is_best": False
+    }
+
+def init_stats_run(): 
+    return {
+        "loss_recon_run": 0,
+        "loss_full_run": 0,
+        "metric_acc_run": 0,
+        "padding_tokens_pct_run": 0
+    }
+
+def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
+    return {
+        "epoch": epoch,
+        f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
+        f"{stage}/loss_full": stats_stage_run["loss_full_run"],
+        f"{stage}/acc": stats_stage_run["metric_acc_run"],
+        f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
+    } 
+
+def decode_sentences(
+    input_ids: Tensor, recon_ids: Tensor, 
+    tokenizer: PreTrainedTokenizer, 
+    decoded_sentences: list, 
+    epoch: int,
+    stage: str,
+    console: Console
+):
+
+    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids)
+    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids)
+
+    for i, r in zip(input_ids_decoded, recon_ids_decoded):
+
+        decoded_sentences.append(
+            {
+                "epoch": epoch,
+                "stage": stage,
+                "input_sentence": i,
+                "recon_sentence":  r
+            }
+        )
+
+    return 
+
+def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
+    save(
+            {
+                "model_state_dict": model.state_dict()
+            }, 
+            checkpoint_file_path
+            
+        )
+
+def checkpoint(stats_train_best: dict, model: Bagon, checkpoint_dir: str, stage: str):
+    
+    if stats_train_best["loss_recon_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_loss_recon_{stage}_best.pth", stage)
+    
+    if stats_train_best["metric_acc_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_metric_acc_{stage}_best.pth", stage)
 
 
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Bagon, tokenizer: PreTrainedTokenizer,
-    opt: Optimizer,
+    model: Bagon, 
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
+    n_epochs_to_decode_after: int, decoded_sentences: list,
+    opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
-    loss_recon_rescale_factor: float,
-    wandb_run: Run
+    wandb_run: Run, run_path: str
 ):
     
     prg.start()
@@ -139,40 +241,21 @@ def train(
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
     batches_task_val   = prg.add_task(f"[bold {COLOR_VAL}] Val   batches", total=n_batches_val)
 
-    multi_class_acc = MulticlassAccuracy(num_classes=vocab_size).to(device)
-    stats_train_best = DotMap(
-        loss_vq_best = np.Inf,
-        loss_vq_is_best = False,
-        loss_recon_best = np.Inf,
-        loss_recon_is_best = False,
-        loss_full_best = np.Inf,
-        loss_full_is_best = False,
-        metric_acc_best = 0,
-        metric_acc_is_best = False
-    )
-    stats_val_best = DotMap(
-        loss_vq_best = np.Inf,
-        loss_recon_best = np.Inf,
-        loss_full_best = np.Inf,
-        metric_acc_best = 0
-    )
+    stats_train_best = init_stats_best()
+    stats_val_best   = init_stats_best()
 
     ### Begin epochs loop ###
 
-    for epoch in range(n_epochs):
+    for epoch in range(1, n_epochs + 1):
 
         prg.reset(batches_task_train)
         prg.reset(batches_task_val)
 
         ### Begin trainining part ### 
         
-        stats_train_run = DotMap(
-            loss_vq_run = 0,
-            loss_recon_run = 0,
-            loss_full_run = 0,
-            metric_acc_run = 0
-        )
+        stats_train_run = init_stats_run()
         n_els_epoch = 0
+        n_steps = 0
         model.train()
 
         ### Begin train batches loop ### 
@@ -180,14 +263,20 @@ def train(
         for batch in list(dl_train)[:n_batches_train]:
             n_els_batch = len(batch)
             n_els_epoch += n_els_batch
+            n_steps += 1
 
-            stats_step: DotMap = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
-                model=model, tokenizer=tokenizer, opt=opt,
+                model=model, 
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                opt=opt, 
+                lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
-                loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
             )
+
+            if epoch % n_epochs_to_decode_after == 0:
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "train", console)
 
             stats_train_run = end_of_step_stats_update(stats_train_run, stats_step, n_els_batch)
             
@@ -196,29 +285,18 @@ def train(
 
         ### End train batches loop ### 
             
-        stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch)
+        stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
-        wandb_run.log(
-            {
-                "epoch": epoch,
-                "train/loss_vq": stats_train_run.loss_vq_run,
-                "train/loss_recon": stats_train_run.loss_recon_run,
-                "train/loss_full": stats_train_run.loss_full_run,
-                "train/acc": stats_train_run.metric_acc_run
-            }
-        )
+        wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
+        checkpoint(stats_train_best, model, run_path, "train")
 
         ### End training part ### 
         
         ### Beging validating part ### 
 
-        stats_val_run = DotMap(
-            loss_vq_run = 0,
-            loss_recon_run = 0,
-            loss_full_run = 0,
-            metric_acc_run = 0
-        )
+        stats_val_run = init_stats_run()
         n_els_epoch = 0
+        n_steps = 0
         model.eval()    
 
         ### Begin val batches loop ### 
@@ -227,16 +305,22 @@ def train(
 
             n_els_batch = len(batch)
             n_els_epoch += n_els_batch
+            n_steps += 1
 
             with no_grad():
 
-                stats_step: DotMap = step(
+                stats_step, input_ids, recon_ids = step(
                     device=device,
-                    model=model, tokenizer=tokenizer, opt=None,
+                    model=model,
+                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                    opt=None, 
+                    lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
-                    loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                     console=console
                 )
+
+            if epoch % n_epochs_to_decode_after == 0:
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "val", console)
             
             stats_val_run = end_of_step_stats_update(stats_val_run, stats_step, n_els_batch)
 
@@ -245,17 +329,10 @@ def train(
 
         ### End val batches loop ### 
             
-        stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch)
-        end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != (n_epochs - 1))
-        wandb_run.log(
-            {
-                "epoch": epoch,
-                "val/loss_vq": stats_val_run.loss_vq_run,
-                "val/loss_recon": stats_val_run.loss_recon_run,
-                "val/loss_full": stats_val_run.loss_full_run,
-                "val/acc": stats_val_run.metric_acc_run
-            }
-        )
+        stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
+        end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != n_epochs)
+        wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
+        checkpoint(stats_train_best, model, run_path, "val")
 
         ### End validating part ### 
 
@@ -267,32 +344,21 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, tokenizer: PreTrainedTokenizer,
+    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    decoded_sentences: list,
     vocab_size: int,
-    loss_recon_rescale_factor: float,
     epoch: int,
     wandb_run: Run
 ):
     
     batches_task_test  = prg.add_task(f"[bold {COLOR_TEST}] Test  batches", total=n_batches_test)
-    
-    multi_class_acc = MulticlassAccuracy(num_classes=vocab_size).to(device)
-    stats_test_best = DotMap(
-        loss_vq_best = np.Inf,
-        loss_recon_best = np.Inf,
-        loss_full_best = np.Inf,
-        metric_acc_best = 0
-    )
+    stats_test_best = init_stats_best()
     
     ### Beging testing part ### 
 
-    stats_test_run = DotMap(
-        loss_vq_run = 0,
-        loss_recon_run = 0,
-        loss_full_run = 0,
-        metric_acc_run = 0
-    )
+    stats_test_run = init_stats_run()
     n_els_epoch = 0
+    n_steps = 0
     model.eval()    
 
     ### Begin val batches loop ### 
@@ -301,16 +367,21 @@ def test(
 
         n_els_batch = len(batch)
         n_els_epoch += n_els_batch
+        n_steps += 1
 
         with no_grad():
 
-            stats_step: DotMap = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
-                model=model, tokenizer=tokenizer, opt=None,
+                model=model,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                opt=None, 
+                lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
-                loss_recon_rescale_factor=loss_recon_rescale_factor, multi_class_acc=multi_class_acc,
                 console=console
             )
+
+        decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "test", console)
         
         stats_test_run = end_of_step_stats_update(stats_test_run, stats_step, n_els_batch)
 
@@ -318,17 +389,9 @@ def test(
 
     ### End test batches loop ### 
         
-    stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_els_epoch)
+    stats_test_run, stats_test_best = end_of_epoch_stats_update(stats_test_run, stats_test_best, n_els_epoch, n_steps)
     end_of_epoch_print(stats_test_run, stats_test_best, console, epoch, False, COLOR_TEST, STATS_EMOJI_TEST, True)
-    wandb_run.log(
-        {
-            "epoch": epoch,
-            "test/loss_vq": stats_test_run.loss_vq_run,
-            "test/loss_recon": stats_test_run.loss_recon_run,
-            "test/loss_full": stats_test_run.loss_full_run,
-            "test/acc": stats_test_run.metric_acc_run
-        }
-    )
+    wandb_run.log(create_wandb_log_dict(epoch, stats_test_run, "test"))
 
     ### End testing part ###
 

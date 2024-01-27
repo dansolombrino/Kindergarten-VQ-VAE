@@ -6,11 +6,13 @@ from datasets.dSentences.dSentencesDataset import dSentencesDataset
 
 from torch.utils.data import random_split, DataLoader
 
-from Bagon import Bagon
+from Shelgon import Shelgon
 
 from transformers import BertTokenizer
 
 from torch.optim.adam import Adam
+
+from torch.optim.lr_scheduler import MultiStepLR
 
 from rich.progress import *
 from rich.style import Style
@@ -20,6 +22,14 @@ from rich.console import Console
 import wandb
 
 from Trainer import train, test
+
+from datetime import datetime
+
+from common.consts import *
+
+import os
+
+import pandas as pd
 
 
 def main():
@@ -41,20 +51,23 @@ def main():
 
     from transformers.utils import logging
     logging.set_verbosity(40)
-    model = Bagon(
+    model = Shelgon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
         decoder_model_name=DECODER_MODEL_NAME
     ).to(device)
     model.compile()
     model.set_mode(MODEL_MODE)
     model.model_params_summary_print()
 
-    tokenizer_name = "bert-base-uncased"
+    tokenizer_name = TOKENIZER_NAME
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
     VOCAB_SIZE = 30522
 
     opt = Adam(params=model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, amsgrad=AMSGRAD)
+    if LR_SCHEDULER == "MultiStepLR":
+        lr_sched = MultiStepLR(optimizer=opt, milestones=MILESTONES, gamma=GAMMA)
+    else:
+        lr_sched = None
 
     console = Console()
     prg = Progress(
@@ -71,15 +84,19 @@ def main():
         SpinnerColumn(spinner_name="moon"),
         console=console
     )
+
+    run_id = datetime.now().strftime(RUN_ID_TIMESTAMP_FORMAT)
+    run_path = f"{RUNS_DIR}/{run_id}"
+    os.makedirs(run_path) if not os.path.exists(run_path) else None
     
     run_conf = get_config()
     run_conf.update(
         {
             "n_params": model.model_params_summary_dict(), 
-            "optimizer": str(opt)
+            "optimizer": str(opt),
+            "run_id": run_id
         }
     )
-    import os
     os.environ["WANDB_SILENT"] = WANDB_SILENT
     wandb_run = wandb.init(
         project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
@@ -87,32 +104,41 @@ def main():
     )
     if WANDB_WATCH_MODEL:
         wandb_run.watch(model, log='all')
+    if WANDB_LOG_CODE:
+        wandb.run.log_code(".")
     
     n_batches_train = int(len(dl_train) * LIM_BATCHES_TRAIN_PCT)
     n_batches_val   = int(len(dl_val  ) * LIM_BATCHES_VAL_PCT)
+    decoded_sentences = []
     train(
         prg=prg, console=console,
         device=device, 
         dl_train=dl_train, dl_val=dl_val, n_batches_train=n_batches_train, n_batches_val=n_batches_val,
-        model=model, tokenizer=tokenizer,
-        opt=opt,
+        model=model, 
+        tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, 
+        n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER, decoded_sentences=decoded_sentences,
+        opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
-        wandb_run=wandb_run
+        wandb_run=wandb_run, run_path=run_path
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
+    model_best_val_checkpoint = torch.load(f"{run_path}/bagon_ckpt_loss_recon_val_best.pth")
+    model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
     test(
         prg=prg, console=console,
         device=device,
         dl_test=dl_test, n_batches_test=n_batches_test,
-        model=model, tokenizer=tokenizer,
+        model=model, 
+        tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
+        decoded_sentences=decoded_sentences,
         vocab_size=VOCAB_SIZE,
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR,
         # TODO NOTE handle this in case of resuming from checkpoint!
-        epoch=N_EPOCHS - 1,
+        epoch=N_EPOCHS,
         wandb_run=wandb_run
     )
+    decoded_sentences_df = pd.DataFrame(decoded_sentences)
+    decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     
 
     return

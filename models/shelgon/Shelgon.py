@@ -9,20 +9,22 @@ from transformers import EncoderDecoderModel
 
 from VectorQuantizer import VectorQuantizer
 
-from consts import *
+from common.consts import *
 
-from models.utils import *
+from common.model_utils import *
+
+from models.bagon.Bagon import Bagon
 
 SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
 
 
-class Bagon(nn.Module):
+class Shelgon(Bagon):
     def __init__(
         self, encoder_model_name: str, 
         vq_n_e: int, vq_e_dim: int, vq_beta: float,
         decoder_model_name: str
     ):
-        super(Bagon, self).__init__()
+        super(Shelgon, self).__init__()
 
         encoder_decoder_model: EncoderDecoderModel = EncoderDecoderModel.from_encoder_decoder_pretrained(encoder_model_name, decoder_model_name)
 
@@ -133,7 +135,7 @@ def main():
     vq_beta = 0.69
     decoder_model_name = "bert-base-uncased"
 
-    model = Bagon(encoder_model_name, vq_n_e, vq_e_dim, vq_beta, decoder_model_name)
+    model = Shelgon(encoder_model_name, vq_n_e, vq_e_dim, vq_beta, decoder_model_name)
 
     tokenizer_name = "bert-base-uncased"
     tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
