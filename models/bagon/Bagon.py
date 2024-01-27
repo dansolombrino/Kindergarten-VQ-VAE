@@ -9,7 +9,7 @@ from transformers import EncoderDecoderModel
 
 from common.consts import *
 
-from models.utils import *
+from common.model_utils import *
 
 SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
 
