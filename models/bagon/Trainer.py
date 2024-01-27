@@ -78,14 +78,14 @@ def step(
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
-    loss_recon_step = cross_entropy(
-        input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
-    )
-    # loss_recon_step = kl_div(
-    #     input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
-    #     target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
-    #     reduction="batchmean"
+    # loss_recon_step = cross_entropy(
+    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
     # )
+    loss_recon_step = kl_div(
+        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
+        target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
+        reduction="batchmean"
+    )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
     metric_acc_step = seq_acc(recon_ids, input_ids)
@@ -106,7 +106,7 @@ def step(
         "loss_recon_step": loss_recon_step, 
         "loss_full_step": loss_full_step, 
         "metric_acc_step": metric_acc_step,
-        "padding_tokens_pct_step": count_pct_padding_tokens(input_ids, console)
+        "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
     }, input_ids, recon_ids
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
@@ -178,18 +178,28 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
     } 
 
-def decode_sentences(input_ids, recon_ids, tokenizer: PreTrainedTokenizer, console: Console):
+def decode_sentences(
+    input_ids: Tensor, recon_ids: Tensor, 
+    tokenizer: PreTrainedTokenizer, 
+    decoded_sentences: list, 
+    epoch: int,
+    stage: str,
+    console: Console
+):
 
-    from tokenizers import decoders
+    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids)
+    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids)
 
-    # unfortunately, convert_ids_to_tokens does NOT support batched inputs :(
-    for x, y in zip(input_ids, recon_ids):
-        x_decoded = tokenizer.convert_ids_to_tokens(x)
-        y_decoded = tokenizer.convert_ids_to_tokens(y)
+    for i, r in zip(input_ids_decoded, recon_ids_decoded):
 
-        console.print(f"original sentence: {' '.join(x_decoded)}")
-        console.print(f"recon    sentence: {' '.join(y_decoded)}")
-        console.print("\n")
+        decoded_sentences.append(
+            {
+                "epoch": epoch,
+                "stage": stage,
+                "input_sentence": i,
+                "recon_sentence":  r
+            }
+        )
 
     return 
 
@@ -199,11 +209,11 @@ def train(
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
     model: Bagon, 
     tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
-    n_epochs_to_decode_after: int,
+    n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
-    wandb_run: Run
+    wandb_run: Run, run_path: str
 ):
     
     prg.start()
@@ -216,7 +226,7 @@ def train(
 
     ### Begin epochs loop ###
 
-    for epoch in range(n_epochs):
+    for epoch in range(1, n_epochs + 1):
 
         prg.reset(batches_task_train)
         prg.reset(batches_task_val)
@@ -245,7 +255,8 @@ def train(
                 console=console
             )
 
-            # decode_sentences(input_ids, recon_ids, tokenizer, console)
+            if epoch % n_epochs_to_decode_after == 0:
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "train", console)
 
             stats_train_run = end_of_step_stats_update(stats_train_run, stats_step, n_els_batch)
             
@@ -277,7 +288,7 @@ def train(
 
             with no_grad():
 
-                stats_step, _, _ = step(
+                stats_step, input_ids, recon_ids = step(
                     device=device,
                     model=model,
                     tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
@@ -286,6 +297,9 @@ def train(
                     batch=batch, vocab_size=vocab_size,
                     console=console
                 )
+
+            if epoch % n_epochs_to_decode_after == 0:
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "val", console)
             
             stats_val_run = end_of_step_stats_update(stats_val_run, stats_step, n_els_batch)
 
@@ -295,7 +309,7 @@ def train(
         ### End val batches loop ### 
             
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
-        end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != (n_epochs - 1))
+        end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != n_epochs)
         wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
 
         ### End validating part ### 
@@ -309,6 +323,7 @@ def test(
     device: device, 
     dl_test: DataLoader, n_batches_test,
     model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    decoded_sentences: list,
     vocab_size: int,
     epoch: int,
     wandb_run: Run
@@ -334,7 +349,7 @@ def test(
 
         with no_grad():
 
-            stats_step, _, _ = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
                 model=model,
                 tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
@@ -343,6 +358,8 @@ def test(
                 batch=batch, vocab_size=vocab_size,
                 console=console
             )
+
+        decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "test", console)
         
         stats_test_run = end_of_step_stats_update(stats_test_run, stats_step, n_els_batch)
 

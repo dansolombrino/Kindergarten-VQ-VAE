@@ -23,6 +23,14 @@ import wandb
 
 from Trainer import train, test
 
+from datetime import datetime
+
+from consts import *
+
+import os
+
+import pandas as pd
+
 
 def main():
 
@@ -76,15 +84,19 @@ def main():
         SpinnerColumn(spinner_name="moon"),
         console=console
     )
+
+    run_id = datetime.now().strftime(RUN_ID_TIMESTAMP_FORMAT)
+    run_path = f"{RUNS_DIR}/{run_id}"
+    os.makedirs(run_path) if not os.path.exists(run_path) else None
     
     run_conf = get_config()
     run_conf.update(
         {
             "n_params": model.model_params_summary_dict(), 
-            "optimizer": str(opt)
+            "optimizer": str(opt),
+            "run_id": run_id
         }
     )
-    import os
     os.environ["WANDB_SILENT"] = WANDB_SILENT
     wandb_run = wandb.init(
         project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
@@ -97,18 +109,21 @@ def main():
     
     n_batches_train = int(len(dl_train) * LIM_BATCHES_TRAIN_PCT)
     n_batches_val   = int(len(dl_val  ) * LIM_BATCHES_VAL_PCT)
+    decoded_sentences = []
     train(
         prg=prg, console=console,
         device=device, 
         dl_train=dl_train, dl_val=dl_val, n_batches_train=n_batches_train, n_batches_val=n_batches_val,
         model=model, 
         tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, 
-        n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER,
+        n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER, decoded_sentences=decoded_sentences,
         opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
-        wandb_run=wandb_run
+        wandb_run=wandb_run, run_path=run_path
     )
+    decoded_sentences_df = pd.DataFrame(decoded_sentences)
+    decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
     test(
         prg=prg, console=console,
@@ -116,6 +131,7 @@ def main():
         dl_test=dl_test, n_batches_test=n_batches_test,
         model=model, 
         tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
+        decoded_sentences=decoded_sentences,
         vocab_size=VOCAB_SIZE,
         # TODO NOTE handle this in case of resuming from checkpoint!
         epoch=N_EPOCHS - 1,
