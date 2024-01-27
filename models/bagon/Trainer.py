@@ -24,7 +24,7 @@ from torch.nn.functional import cross_entropy
 from torch.nn.functional import kl_div
 
 from torchmetrics.classification import MulticlassAccuracy
-from metrics import seq_acc
+from common.metrics import seq_acc
 
 from torch.nn.functional import softmax
 from torch.nn.functional import log_softmax
