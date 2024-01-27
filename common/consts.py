@@ -14,6 +14,6 @@ STATS_EMOJI_TEST  = [':cowboy_hat_face:', ':crystal_ball:', ':teddy_bear:']
 
 RUN_ID_TIMESTAMP_FORMAT = "%Y_%m_%d_%H_%M_%S"
 
-RUNS_DIR = "./runs/Bagon"
+RUNS_BASE_DIR = "./runs"
 
 ### Training ###

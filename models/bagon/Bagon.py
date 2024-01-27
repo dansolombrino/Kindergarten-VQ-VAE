@@ -7,7 +7,7 @@ from torch.nn.functional import softmax
 
 from transformers import EncoderDecoderModel
 
-from consts import *
+from common.consts import *
 
 from models.utils import *
 

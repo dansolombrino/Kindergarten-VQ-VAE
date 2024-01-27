@@ -25,7 +25,7 @@ from Trainer import train, test
 
 from datetime import datetime
 
-from consts import *
+from common.consts import *
 
 import os
 

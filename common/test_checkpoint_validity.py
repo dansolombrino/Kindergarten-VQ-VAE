@@ -5,23 +5,29 @@ from rich import print
 
 import torch
 
-from Bagon import Bagon
+from models.bagon.Bagon import Bagon
 
 from transformers import BertTokenizer
 
 from torch import Tensor
 
-# loaded_checkpoint = torch.load("/home/dansolombrino/PARA/Projects/Kindergarten-VQ-VAE/runs/Bagon/2024_01_27_09_53_31/bagon_ckpt_loss_recon_train_best.pth")
-loaded_checkpoint = torch.load("./runs/Bagon/2024_01_27_10_11_32/bagon_ckpt_loss_recon_train_best.pth")
+SUPPORTED_MODEL_NAMES = ["Bagon"]
+MODEL_NAME = "Bagon"
+
+loaded_checkpoint = torch.load(f"./runs/{MODEL_NAME}/2024_01_27_11_15_55/bagon_ckpt_loss_recon_train_best.pth")
 
 ENCODER_MODEL_NAME = "bert-base-uncased"
 DECODER_MODEL_NAME = "bert-base-uncased"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = Bagon(
-    encoder_model_name=ENCODER_MODEL_NAME, 
-    decoder_model_name=DECODER_MODEL_NAME
-).to(device)
-model.load_state_dict(loaded_checkpoint["model_state_dict"])
+
+if MODEL_NAME == "Bagon":
+    model = Bagon(
+        encoder_model_name=ENCODER_MODEL_NAME, 
+        decoder_model_name=DECODER_MODEL_NAME
+    ).to(device)
+    model.load_state_dict(loaded_checkpoint["model_state_dict"])
+else:
+    raise ValueError(f"Invalid model name \"{MODEL_NAME}\", supported values: {', '.join(SUPPORTED_MODEL_NAMES)}")
 
 TOKENIZER_NAME = "bert-base-uncased"
 tokenizer: BertTokenizer = BertTokenizer.from_pretrained(TOKENIZER_NAME)

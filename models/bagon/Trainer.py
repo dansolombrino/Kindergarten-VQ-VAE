@@ -35,7 +35,7 @@ import numpy as np
 
 from torch import no_grad
 
-from consts import *
+from common.consts import *
 
 from wandb.wandb_run import Run
 
