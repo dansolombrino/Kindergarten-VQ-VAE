@@ -43,6 +43,7 @@ class Shelgon(Bagon):
             self.encoder.load_state_dict(bagon_checkpoint["encoder_state_dict"])
             self.decoder.load_state_dict(bagon_checkpoint["decoder_state_dict"])
 
+        self.model_mode = "full"
         
 
     def forward(self, input_ids, attention_mask, device):
@@ -98,9 +99,11 @@ class Shelgon(Bagon):
     
     def set_mode(self, model_mode: str):
         if model_mode == "full":
+            self.model_mode = "full"
             return
         
         if model_mode == "dec-head-ft":
+            self.model_mode = "dec-head-ft"
             # Layers composing BERT classification head, in Huggingface implementation:
             # - decoder.cls.predictions.transform.dense 
             # - decoder.cls.predictions.decoder
@@ -125,6 +128,7 @@ class Shelgon(Bagon):
             return
         
         if model_mode == "vq-ft":
+            self.model_mode = "vq-ft"
             # we want to just fine-tune the vector quantization NN --> gotta freeze encoder and decoder
             for param in self.encoder.parameters():
                 param.requires_grad = False
