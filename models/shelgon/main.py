@@ -53,7 +53,9 @@ def main():
     logging.set_verbosity(40)
     model = Shelgon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        decoder_model_name=DECODER_MODEL_NAME
+        vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
+        decoder_model_name=DECODER_MODEL_NAME,
+        from_pretrained_bagon=FROM_PRETRAINED_BAGON
     ).to(device)
     model.compile()
     model.set_mode(MODEL_MODE)
@@ -123,7 +125,7 @@ def main():
         wandb_run=wandb_run, run_path=run_path
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
-    model_best_val_checkpoint = torch.load(f"{run_path}/bagon_ckpt_loss_recon_val_best.pth")
+    model_best_val_checkpoint = torch.load(f"{run_path}/shelgon_ckpt_loss_recon_val_best.pth")
     model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
     test(
         prg=prg, console=console,

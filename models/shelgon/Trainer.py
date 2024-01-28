@@ -8,7 +8,7 @@ from torch.cuda import device
 
 from torch.utils.data import DataLoader
 
-from Bagon import Bagon
+from Shelgon import Shelgon
 
 from transformers import PreTrainedTokenizer
 
@@ -24,7 +24,7 @@ from torch.nn.functional import cross_entropy
 from torch.nn.functional import kl_div
 
 from torchmetrics.classification import MulticlassAccuracy
-from metrics import seq_acc
+from common.metrics import seq_acc
 
 from torch.nn.functional import softmax
 from torch.nn.functional import log_softmax
@@ -35,7 +35,7 @@ import numpy as np
 
 from torch import no_grad
 
-from consts import *
+from common.consts import *
 
 from wandb.wandb_run import Run
 
@@ -62,7 +62,7 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     opt: Optimizer, 
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
@@ -76,7 +76,8 @@ def step(
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    logits_recon: Tensor = model.forward(input_ids, attention_mask)
+    loss_vq_step: Tensor; logits_recon: Tensor
+    loss_vq_step, logits_recon = model.forward(input_ids, attention_mask, device)
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
@@ -92,7 +93,7 @@ def step(
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
     metric_acc_step = seq_acc(recon_ids, input_ids)
 
-    loss_full_step: Tensor = loss_recon_step
+    loss_full_step: Tensor = loss_recon_step + loss_vq_step
 
     # passing opt  --> training time
     # passing None --> inference time
@@ -106,6 +107,7 @@ def step(
 
     return {
         "loss_recon_step": loss_recon_step, 
+        "loss_vq_step": loss_vq_step,
         "loss_full_step": loss_full_step, 
         "metric_acc_step": metric_acc_step,
         "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
@@ -114,6 +116,7 @@ def step(
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
+    stats_stage_run["loss_vq_run"] += stats_step["loss_vq_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
     stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
     stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
@@ -123,12 +126,15 @@ def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batc
 def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int, n_steps: int):
 
     stats_stage_run["loss_recon_run"] /= n_els_epoch
+    stats_stage_run["loss_vq_run"] /= n_els_epoch
     stats_stage_run["loss_full_run"] /= n_els_epoch
     stats_stage_run["metric_acc_run"] /= n_els_epoch
     stats_stage_run["padding_tokens_pct_run"] /= n_steps
 
     stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
     stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_vq_is_best"] = stats_stage_run["loss_vq_run"] < stats_stage_best["loss_vq_best"]
+    stats_stage_best["loss_vq_best"] = stats_stage_run["loss_vq_run"] if stats_stage_best["loss_vq_is_best"] else stats_stage_best["loss_vq_best"]
     stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
     stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
     stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
@@ -149,6 +155,7 @@ def end_of_epoch_print(
     console.print(
         epoch_str  + \
         f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
+        f"loss_vq: [bold {stat_color}] {stats_stage_run['loss_vq_run']:08.6f}[/bold {stat_color}] {stat_emojis[0] if stats_stage_best['loss_vq_is_best'] else '  '} | " + \
         f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
         suffix_str
     )
@@ -157,6 +164,8 @@ def init_stats_best():
     return {
         "loss_recon_best": np.Inf,
         "loss_recon_is_best": False,
+        "loss_vq_best": np.Inf,
+        "loss_vq_is_best": False,
         "loss_full_best": np.Inf,
         "loss_full_is_best": False,
         "metric_acc_best": 0,
@@ -166,6 +175,7 @@ def init_stats_best():
 def init_stats_run(): 
     return {
         "loss_recon_run": 0,
+        "loss_vq_run": 0,
         "loss_full_run": 0,
         "metric_acc_run": 0,
         "padding_tokens_pct_run": 0
@@ -175,6 +185,7 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
     return {
         "epoch": epoch,
         f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
+        f"{stage}/loss_vq": stats_stage_run["loss_vq_run"],
         f"{stage}/loss_full": stats_stage_run["loss_full_run"],
         f"{stage}/acc": stats_stage_run["metric_acc_run"],
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
@@ -205,29 +216,37 @@ def decode_sentences(
 
     return 
 
-def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
+def _save_ckpt(model: Shelgon, checkpoint_file_path: str, stage: str):
     save(
             {
-                "model_state_dict": model.state_dict()
+                "model_state_dict": model.state_dict(),
+                "encoder_state_dict": model.encoder.state_dict(),
+                "decoder_state_dict": model.decoder.state_dict(),
             }, 
             checkpoint_file_path
             
         )
 
-def checkpoint(stats_train_best: dict, model: Bagon, checkpoint_dir: str, stage: str):
+def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stage: str):
     
     if stats_train_best["loss_recon_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_loss_recon_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_recon_{stage}_best.pth", stage)
+    
+    if stats_train_best["loss_vq_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_vq_{stage}_best.pth", stage)
+    
+    if stats_train_best["loss_full_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
     
     if stats_train_best["metric_acc_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_metric_acc_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_acc_{stage}_best.pth", stage)
 
 
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Bagon, 
+    model: Shelgon, 
     tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
@@ -344,7 +363,7 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     decoded_sentences: list,
     vocab_size: int,
     epoch: int,
