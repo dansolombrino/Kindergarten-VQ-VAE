@@ -64,6 +64,8 @@ def step(
     device: device,
     model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     opt: Optimizer, 
+    loss_recon_rescale_factor: float, loss_recon_weight: float,
+    loss_vq_rescale_factor: float, loss_vq_weight: float,
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
     console: Console
@@ -93,6 +95,8 @@ def step(
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
     metric_acc_step = seq_acc(recon_ids, input_ids)
 
+    loss_recon_step *= loss_recon_rescale_factor * loss_recon_weight
+    loss_vq_step *= loss_vq_rescale_factor * loss_vq_weight
     loss_full_step: Tensor = loss_recon_step + loss_vq_step
 
     # passing opt  --> training time
@@ -249,7 +253,10 @@ def train(
     model: Shelgon, 
     tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
     n_epochs_to_decode_after: int, decoded_sentences: list,
-    opt: Optimizer, lr_sched: LRScheduler, 
+    opt: Optimizer, 
+    loss_recon_rescale_factor: float, loss_recon_weight: float, 
+    loss_vq_rescale_factor: float, loss_vq_weight: float, 
+    lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
     wandb_run: Run, run_path: str
@@ -289,6 +296,8 @@ def train(
                 model=model, 
                 tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=opt, 
+                loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
+                loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
                 console=console
@@ -333,6 +342,8 @@ def train(
                     model=model,
                     tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                     opt=None, 
+                    loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
+                    loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
                     console=console
@@ -364,6 +375,8 @@ def test(
     device: device, 
     dl_test: DataLoader, n_batches_test,
     model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    loss_recon_rescale_factor: float, loss_recon_weight: float,
+    loss_vq_rescale_factor: float, loss_vq_weight: float,
     decoded_sentences: list,
     vocab_size: int,
     epoch: int,
@@ -395,6 +408,8 @@ def test(
                 model=model,
                 tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=None, 
+                loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight, 
+                loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
                 console=console
