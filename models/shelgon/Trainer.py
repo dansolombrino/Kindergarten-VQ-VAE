@@ -265,7 +265,7 @@ def train(
     if not export_checkpoint:
         console.print(f"[bold {COLOR_WARNING}]Warning[/bold {COLOR_WARNING}] checkpoint exporting is [bold {COLOR_OFF}]OFF[/bold {COLOR_OFF}]!\n")
     
-    # prg.start()
+    prg.start()
     epochs_task = prg.add_task(f"[bold {COLOR_EPOCH}] Epochs", total=n_epochs)
     batches_task_train = prg.add_task(f"[bold {COLOR_TRAIN}] Train batches", total=n_batches_train)
     batches_task_val   = prg.add_task(f"[bold {COLOR_VAL}] Val   batches", total=n_batches_val)
