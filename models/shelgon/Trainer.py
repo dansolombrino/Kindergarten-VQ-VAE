@@ -71,15 +71,14 @@ def step(
     console: Console
 
 ):
-    # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
-    # TODO NOTE or improve its handling even if dSentences will be the only dataset used
-    # tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
-    tokenized = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
+    sentences = batch["sentence"]
+    latent_classes_labels = batch["latent_classes_labels"]
+    tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    loss_vq_step: Tensor; logits_recon: Tensor
-    loss_vq_step, logits_recon = model.forward(input_ids, attention_mask, device)
+    loss_vq_step: Tensor; min_encoding_indices: Tensor; logits_recon: Tensor
+    loss_vq_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device)
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
@@ -259,8 +258,12 @@ def train(
     lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
-    wandb_run: Run, run_path: str
+    wandb_run: Run, run_path: str,
+    export_checkpoint: bool
 ):
+    
+    if not export_checkpoint:
+        console.print(f"[bold {COLOR_WARNING}]Warning[/bold {COLOR_WARNING}] checkpoint exporting is [bold {COLOR_OFF}]OFF[/bold {COLOR_OFF}]!\n")
     
     prg.start()
     epochs_task = prg.add_task(f"[bold {COLOR_EPOCH}] Epochs", total=n_epochs)
@@ -316,7 +319,7 @@ def train(
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
         wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
-        checkpoint(stats_train_best, model, run_path, "train")
+        if export_checkpoint: checkpoint(stats_train_best, model, run_path, "train")
 
         ### End training part ### 
         
@@ -362,7 +365,7 @@ def train(
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != n_epochs)
         wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
-        checkpoint(stats_train_best, model, run_path, "val")
+        if export_checkpoint: checkpoint(stats_train_best, model, run_path, "val")
 
         ### End validating part ### 
 

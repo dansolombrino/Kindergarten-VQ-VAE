@@ -36,7 +36,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ds = dSentencesDataset(DATASET_PATH)
+    ds = dSentencesDataset(SENTENCES_PATH, LATENT_CLASSES_LABELS_PATH)
     
     ds_train_len = int(len(ds) * TRAIN_SPLIT_PCT)
     ds_val_len = int(len(ds) * VAL_SPLIT_PCT)
@@ -125,25 +125,33 @@ def main():
         lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,
-        wandb_run=wandb_run, run_path=run_path
+        wandb_run=wandb_run, run_path=run_path,
+        export_checkpoint=EXPORT_CHECKPOINT
     )
-    n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
-    model_best_val_checkpoint = torch.load(f"{run_path}/shelgon_ckpt_loss_recon_val_best.pth")
-    model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
-    test(
-        prg=prg, console=console,
-        device=device,
-        dl_test=dl_test, n_batches_test=n_batches_test,
-        model=model, 
-        loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT,
-        loss_vq_rescale_factor=LOSS_VQ_RESCALE_FACTOR, loss_vq_weight=LOSS_VQ_WEIGHT,
-        tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
-        decoded_sentences=decoded_sentences,
-        vocab_size=VOCAB_SIZE,
-        # TODO NOTE handle this in case of resuming from checkpoint!
-        epoch=N_EPOCHS,
-        wandb_run=wandb_run
-    )
+    
+    if EXPORT_CHECKPOINT:
+        # testing requires loading the best val checkpoint
+        # so, if no checkpoint has been exported, no testing can be done
+        # For now, it's ok this way!
+        # TODO improve handling of this. 
+
+        n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
+        model_best_val_checkpoint = torch.load(f"{run_path}/shelgon_ckpt_loss_recon_val_best.pth")
+        model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
+        test(
+            prg=prg, console=console,
+            device=device,
+            dl_test=dl_test, n_batches_test=n_batches_test,
+            model=model, 
+            loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT,
+            loss_vq_rescale_factor=LOSS_VQ_RESCALE_FACTOR, loss_vq_weight=LOSS_VQ_WEIGHT,
+            tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
+            decoded_sentences=decoded_sentences,
+            vocab_size=VOCAB_SIZE,
+            # TODO NOTE handle this in case of resuming from checkpoint!
+            epoch=N_EPOCHS,
+            wandb_run=wandb_run
+        )
     decoded_sentences_df = pd.DataFrame(decoded_sentences)
     decoded_sentences_df.to_feather(f"{run_path}/decoded_sentences.feather")
     

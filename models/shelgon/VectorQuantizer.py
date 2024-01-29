@@ -71,6 +71,7 @@ class VectorQuantizer(nn.Module):
         z_q = z + (z_q - z).detach()
 
         # perplexity
+        # explanation here: https://stats.stackexchange.com/questions/600948/codebook-perplexity-in-vq-vae
         e_mean = torch.mean(min_encodings, dim=0)
         perplexity = torch.exp(-torch.sum(e_mean * torch.log(e_mean + 1e-10)))
 

@@ -57,7 +57,7 @@ class Shelgon(Bagon):
         # reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
         reconstructed_logits = self.decoder(encoder_hidden_states=z_q, input_ids=input_ids, attention_mask=attention_mask).logits
 
-        return vq_loss, reconstructed_logits
+        return vq_loss, min_encoding_indices, reconstructed_logits
     
     def model_params_summary_dict(self):
         return {

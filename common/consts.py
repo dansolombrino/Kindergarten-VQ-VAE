@@ -8,6 +8,9 @@ COLOR_TEST  = "#914418"
 COLOR_FROZEN = "#E71111"
 COLOR_TOT = "#3C493F"
 
+COLOR_WARNING = "#b89d0b"
+COLOR_OFF = "red"
+
 STATS_EMOJI_TRAIN = [':party_popper:',':rocket:', ':partying_face:']
 STATS_EMOJI_VAL   = [':gift:', ':football:', ':dragon:']
 STATS_EMOJI_TEST  = [':cowboy_hat_face:', ':crystal_ball:', ':teddy_bear:']
