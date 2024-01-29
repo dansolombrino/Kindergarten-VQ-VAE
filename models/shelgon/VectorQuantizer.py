@@ -45,6 +45,8 @@ class VectorQuantizer(nn.Module):
 
         # print(f"[VectorQuantizer] z.shape: {z.shape}\n")
 
+        batch_size, seq_len, _ = z.shape
+
         # flatten input: (B, S, C) --> (B*S, C)
         z_flattened = z.view((-1, self.e_dim))
         # print(f"[VectorQuantizer] z_flattened.shape: {z_flattened.shape}\n")
@@ -57,11 +59,14 @@ class VectorQuantizer(nn.Module):
 
         # find closest encodings
         min_encoding_indices = torch.argmin(d, dim=1).unsqueeze(1)
+        # print(f"[VectorQuantizer] min_encoding_indices.shape: {min_encoding_indices.shape}\n")
         min_encodings = torch.zeros(min_encoding_indices.shape[0], self.n_e).to(device)
         min_encodings.scatter_(1, min_encoding_indices, 1).to(device)
+        # print(f"[VectorQuantizer] min_encodings.shape: {min_encodings.shape}\n")
 
         # get quantized latent vectors
         z_q = torch.matmul(min_encodings, self.embedding.weight).view(z.shape)
+        # print(f"[VectorQuantizer] z_q.shape: {z_q.shape}\n")
 
         # compute loss for embedding
         loss = torch.mean((z_q.detach() - z) ** 2) + \
@@ -77,8 +82,9 @@ class VectorQuantizer(nn.Module):
 
         # reshape back to match original input shape --> NOT needed in Kindergarten-VQ-VAE
         # z_q = z_q.permute(0, 3, 1, 2).contiguous()
-
         # print(f"[VectorQuantizer] z_q.shape: {z_q.shape}\n")
+        min_encoding_indices = min_encoding_indices.reshape((batch_size, seq_len, 1))
+        # print(f"[VectorQuantizer] min_encoding_indices.shape: {min_encoding_indices.shape}\n")
 
         return loss, z_q, perplexity, min_encodings, min_encoding_indices
 
