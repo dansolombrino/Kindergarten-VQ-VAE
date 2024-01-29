@@ -238,11 +238,11 @@ def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stag
     if stats_train_best["loss_vq_is_best"]:
         _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_vq_{stage}_best.pth", stage)
     
-    if stats_train_best["loss_full_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
+    # if stats_train_best["loss_full_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
     
-    if stats_train_best["metric_acc_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_acc_{stage}_best.pth", stage)
+    # if stats_train_best["metric_acc_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_acc_{stage}_best.pth", stage)
 
 
 def train(
@@ -319,7 +319,7 @@ def train(
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
         wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
-        if export_checkpoint: checkpoint(stats_train_best, model, run_path, "train")
+        # if export_checkpoint: checkpoint(stats_train_best, model, run_path, "train")
 
         ### End training part ### 
         
