@@ -171,3 +171,7 @@ wandb/
 **config.py
 
 runs/
+
+# Analyses results
+**.json
+**.txt
