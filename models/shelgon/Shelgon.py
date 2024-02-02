@@ -7,7 +7,7 @@ from torch.nn.functional import softmax
 
 from transformers import EncoderDecoderModel
 
-from VectorQuantizer import VectorQuantizer
+from models.shelgon.VectorQuantizer import VectorQuantizer
 
 from common.consts import *
 
