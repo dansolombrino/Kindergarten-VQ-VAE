@@ -46,7 +46,7 @@ model = Shelgon(
     decoder_model_name=DECODER_MODEL_NAME,
     from_pretrained_bagon=FROM_PRETRAINED_BAGON
 ).to(device)
-RUN_ID = "2024_01_29_12_34_17"
+RUN_ID = "xyz"
 CKPT_PATH = f"./runs/Shelgon/{RUN_ID}/shelgon_ckpt_loss_recon_val_best.pth"
 model.load_state_dict(torch.load(CKPT_PATH)["model_state_dict"])
 model.compile()
@@ -96,7 +96,7 @@ batch_stats_task = prg.add_task("[bold #FF4500]Compiling VQ codebook distributio
 
 seen_v_is = set()
 
-for batch in list(dl)[:2]:
+for batch in list(dl)[:]:
     
     sentences = batch["sentence"]
 
