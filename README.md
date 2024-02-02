@@ -10,6 +10,10 @@
 This is the project folder structure, highlighting the goal of each directory
 
 - `Kindergarten-VQ-VAE` $\to$ project root directory
+    - `analyses` $\to$ utility scripts to perform project analyses
+        - `unsupervised_vq_disentanglement` $\to$ Analysis 1: does unsupervised Vector Quantization disentangle the 9 dSentences generative factors?
+            - `results` $\to$ data gathered from Analysis 1, grouped by run ID
+    
     - `common` $\to$ common utility scripts, classes and constants
 
     - `datasets` $\to$ dataset files
