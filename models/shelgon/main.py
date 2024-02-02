@@ -14,7 +14,8 @@ from torch.optim.adam import Adam
 
 from torch.optim.lr_scheduler import MultiStepLR
 
-from rich.progress import *
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn,TimeElapsedColumn, TimeRemainingColumn
+
 from rich.style import Style
 
 from rich.console import Console
@@ -31,6 +32,7 @@ import os
 
 import pandas as pd
 
+import json
 
 def main():
 
@@ -99,6 +101,8 @@ def main():
             "run_id": run_id
         }
     )
+    with open(f"{run_path}/run_conf.json", 'w') as fp:
+        json.dump(run_conf, fp)
     os.environ["WANDB_SILENT"] = WANDB_SILENT
     wandb_run = wandb.init(
         project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
