@@ -1,3 +1,9 @@
+### Data ###
+
+DS_GEN_SEED = 69
+
+### Data ###
+
 ### Training ###
 
 COLOR_EPOCH = "#BD1376"
