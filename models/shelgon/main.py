@@ -150,6 +150,7 @@ def main():
             model=model, 
             loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT,
             loss_vq_rescale_factor=LOSS_VQ_RESCALE_FACTOR, loss_vq_weight=LOSS_VQ_WEIGHT,
+            loss_perp_rescale_factor=LOSS_PERP_RESCALE_FACTOR, loss_perp_weight=LOSS_PERP_WEIGHT,
             tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
             decoded_sentences=decoded_sentences,
             vocab_size=VOCAB_SIZE,
