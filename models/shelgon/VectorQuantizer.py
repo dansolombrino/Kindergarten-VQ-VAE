@@ -3,6 +3,7 @@ from rich import print
 import torch
 import torch.nn as nn
 
+from torch import Tensor
 
 class VectorQuantizer(nn.Module):
 
@@ -15,14 +16,17 @@ class VectorQuantizer(nn.Module):
     - beta : commitment cost used in loss term, beta * ||z_e(x)-sg[e]||^2
     """
 
-    def __init__(self, n_e, e_dim, beta):
+    def __init__(self, n_e, e_dim, beta, vq_codebook_init_values: Tensor = None):
         super(VectorQuantizer, self).__init__()
         self.n_e = n_e
         self.e_dim = e_dim
         self.beta = beta
 
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
-        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        if vq_codebook_init_values is not None:
+            self.embedding.weight.data.copy_(vq_codebook_init_values)
+        else:
+            self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
 
     def forward(self, z: torch.Tensor, device):
         """

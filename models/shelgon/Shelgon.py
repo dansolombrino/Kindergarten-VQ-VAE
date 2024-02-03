@@ -27,7 +27,8 @@ class Shelgon(Bagon):
         self, encoder_model_name: str, 
         vq_n_e: int, vq_e_dim: int, vq_beta: float,
         decoder_model_name: str,
-        from_pretrained_bagon: Union[str, None]
+        from_pretrained_bagon: Union[str, None],
+        vq_codebook_init_values: Union[Tensor, None]
     ):
         # self.encoder and self.decoder are inherited from Bagon!
         super(Shelgon, self).__init__(
@@ -35,7 +36,9 @@ class Shelgon(Bagon):
             decoder_model_name=decoder_model_name
         )
         
-        self.vector_quantizer: VectorQuantizer = VectorQuantizer(n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta)
+        self.vector_quantizer: VectorQuantizer = VectorQuantizer(
+            n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta, vq_codebook_init_values=vq_codebook_init_values
+        )
         
         if from_pretrained_bagon is not None:
             bagon_checkpoint = torch.load(from_pretrained_bagon)
