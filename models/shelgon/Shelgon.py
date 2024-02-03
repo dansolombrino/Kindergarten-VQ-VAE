@@ -57,7 +57,7 @@ class Shelgon(Bagon):
         # reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
         reconstructed_logits = self.decoder(encoder_hidden_states=z_q, input_ids=input_ids, attention_mask=attention_mask).logits
 
-        return vq_loss, min_encoding_indices, reconstructed_logits
+        return vq_loss, perplexity, min_encoding_indices, reconstructed_logits
     
     def model_params_summary_dict(self):
         return {
@@ -206,7 +206,7 @@ def main():
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    vq_loss, min_encoding_indices, recon_ids = model.forward(input_ids, attention_mask, device)
+    vq_loss, perplexity, min_encoding_indices, recon_ids = model.forward(input_ids, attention_mask, device)
 
     print(recon_ids, recon_ids.shape)
     print()

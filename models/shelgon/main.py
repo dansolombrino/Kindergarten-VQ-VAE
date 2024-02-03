@@ -126,6 +126,7 @@ def main():
         opt=opt, 
         loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT, 
         loss_vq_rescale_factor=LOSS_VQ_RESCALE_FACTOR, loss_vq_weight=LOSS_VQ_WEIGHT, 
+        loss_perp_rescale_factor=LOSS_PERP_RESCALE_FACTOR, loss_perp_weight=LOSS_PERP_WEIGHT, 
         lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
         vocab_size=VOCAB_SIZE,

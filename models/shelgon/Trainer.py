@@ -66,6 +66,7 @@ def step(
     opt: Optimizer, 
     loss_recon_rescale_factor: float, loss_recon_weight: float,
     loss_vq_rescale_factor: float, loss_vq_weight: float,
+    loss_perp_rescale_factor: float, loss_perp_weight: float,
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
     console: Console
@@ -77,8 +78,8 @@ def step(
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    loss_vq_step: Tensor; min_encoding_indices: Tensor; logits_recon: Tensor
-    loss_vq_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device)
+    loss_vq_step: Tensor; loss_perp_step: Tensor; min_encoding_indices: Tensor; logits_recon: Tensor
+    loss_vq_step, loss_perp_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device)
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
@@ -96,7 +97,8 @@ def step(
 
     loss_recon_step *= loss_recon_rescale_factor * loss_recon_weight
     loss_vq_step *= loss_vq_rescale_factor * loss_vq_weight
-    loss_full_step: Tensor = loss_recon_step + loss_vq_step
+    loss_perp_step *= loss_perp_rescale_factor * loss_perp_weight * -1 # perplexity should be maximized!
+    loss_full_step: Tensor = loss_recon_step + loss_vq_step + (-loss_perp_step)
 
     # passing opt  --> training time
     # passing None --> inference time
@@ -111,6 +113,7 @@ def step(
     return {
         "loss_recon_step": loss_recon_step, 
         "loss_vq_step": loss_vq_step,
+        "loss_perp_step": loss_perp_step,
         "loss_full_step": loss_full_step, 
         "metric_acc_step": metric_acc_step,
         "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
@@ -120,6 +123,7 @@ def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batc
     
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
     stats_stage_run["loss_vq_run"] += stats_step["loss_vq_step"] * n_els_batch
+    stats_stage_run["loss_perp_run"] += stats_step["loss_perp_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
     stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
     stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
@@ -130,6 +134,7 @@ def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_e
 
     stats_stage_run["loss_recon_run"] /= n_els_epoch
     stats_stage_run["loss_vq_run"] /= n_els_epoch
+    stats_stage_run["loss_perp_run"] /= n_els_epoch
     stats_stage_run["loss_full_run"] /= n_els_epoch
     stats_stage_run["metric_acc_run"] /= n_els_epoch
     stats_stage_run["padding_tokens_pct_run"] /= n_steps
@@ -138,6 +143,8 @@ def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_e
     stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
     stats_stage_best["loss_vq_is_best"] = stats_stage_run["loss_vq_run"] < stats_stage_best["loss_vq_best"]
     stats_stage_best["loss_vq_best"] = stats_stage_run["loss_vq_run"] if stats_stage_best["loss_vq_is_best"] else stats_stage_best["loss_vq_best"]
+    stats_stage_best["loss_perp_is_best"] = stats_stage_run["loss_perp_run"] < stats_stage_best["loss_perp_best"]
+    stats_stage_best["loss_perp_best"] = stats_stage_run["loss_perp_run"] if stats_stage_best["loss_perp_is_best"] else stats_stage_best["loss_perp_best"]
     stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
     stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
     stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
@@ -159,6 +166,7 @@ def end_of_epoch_print(
         epoch_str  + \
         f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
         f"loss_vq: [bold {stat_color}] {stats_stage_run['loss_vq_run']:08.6f}[/bold {stat_color}] {stat_emojis[0] if stats_stage_best['loss_vq_is_best'] else '  '} | " + \
+        f"loss_perp: [bold {stat_color}] {stats_stage_run['loss_perp_run']:08.6f}[/bold {stat_color}] {stat_emojis[3] if stats_stage_best['loss_perp_is_best'] else '  '} | " + \
         f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
         suffix_str
     )
@@ -169,6 +177,8 @@ def init_stats_best():
         "loss_recon_is_best": False,
         "loss_vq_best": np.Inf,
         "loss_vq_is_best": False,
+        "loss_perp_best": np.Inf,
+        "loss_perp_is_best": False,
         "loss_full_best": np.Inf,
         "loss_full_is_best": False,
         "metric_acc_best": 0,
@@ -179,6 +189,7 @@ def init_stats_run():
     return {
         "loss_recon_run": 0,
         "loss_vq_run": 0,
+        "loss_perp_run": 0,
         "loss_full_run": 0,
         "metric_acc_run": 0,
         "padding_tokens_pct_run": 0
@@ -189,6 +200,7 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
         "epoch": epoch,
         f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
         f"{stage}/loss_vq": stats_stage_run["loss_vq_run"],
+        f"{stage}/loss_perp": stats_stage_run["loss_perp_run"],
         f"{stage}/loss_full": stats_stage_run["loss_full_run"],
         f"{stage}/acc": stats_stage_run["metric_acc_run"],
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
@@ -238,6 +250,9 @@ def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stag
     if stats_train_best["loss_vq_is_best"]:
         _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_vq_{stage}_best.pth", stage)
     
+    if stats_train_best["loss_perp_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_perp_{stage}_best.pth", stage)
+    
     # if stats_train_best["loss_full_is_best"]:
     #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
     
@@ -255,6 +270,7 @@ def train(
     opt: Optimizer, 
     loss_recon_rescale_factor: float, loss_recon_weight: float, 
     loss_vq_rescale_factor: float, loss_vq_weight: float, 
+    loss_perp_rescale_factor: float, loss_perp_weight: float, 
     lr_sched: LRScheduler, 
     n_epochs: int, 
     vocab_size: int,
@@ -301,6 +317,7 @@ def train(
                 opt=opt, 
                 loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
                 loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
                 console=console
@@ -347,6 +364,7 @@ def train(
                     opt=None, 
                     loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
                     loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                    loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
                     console=console
@@ -380,6 +398,7 @@ def test(
     model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     loss_recon_rescale_factor: float, loss_recon_weight: float,
     loss_vq_rescale_factor: float, loss_vq_weight: float,
+    loss_perp_rescale_factor: float, loss_perp_weight: float,
     decoded_sentences: list,
     vocab_size: int,
     epoch: int,
@@ -413,6 +432,7 @@ def test(
                 opt=None, 
                 loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight, 
                 loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
                 console=console
