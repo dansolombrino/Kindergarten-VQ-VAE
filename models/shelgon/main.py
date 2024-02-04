@@ -66,7 +66,10 @@ def main():
             vq_codebook_init_values=vq_codebook_init_values
         )
     elif VQ_MODE == "GumbelQuantizer":
-        vector_quantizer = GumbelQuantizer(enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM)
+        vector_quantizer = GumbelQuantizer(
+            enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM,
+            temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE
+        )
     else:
         raise ValueError(f"{VQ_MODE} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
     

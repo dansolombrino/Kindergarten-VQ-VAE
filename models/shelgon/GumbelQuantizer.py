@@ -24,6 +24,7 @@ class GumbelQuantizer(nn.Module):
         # num_hiddens, 
         enc_out_size, 
         n_embed, embedding_dim, 
+        temperature: float, kl_div_scale: float, 
         straight_through=False
     ):
         super().__init__()
@@ -33,8 +34,10 @@ class GumbelQuantizer(nn.Module):
         self.n_embed = n_embed
 
         self.straight_through = straight_through
-        self.temperature = 1.0
-        self.kld_scale = 5e-4
+        # self.temperature = 1.0
+        # self.kld_scale = 5e-4
+        self.temperature = temperature
+        self.kld_scale = kl_div_scale
 
         # self.proj = nn.Conv2d(num_hiddens, n_embed, 1)
         self.proj = nn.Conv1d(enc_out_size, n_embed, 1)
