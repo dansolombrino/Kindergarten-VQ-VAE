@@ -4,6 +4,12 @@ DS_GEN_SEED = 69
 
 ### Data ###
 
+### Model ###
+
+SUPPORTED_VQ_MODES = ["VectorQuantizer", "GumbelQuantizer"]
+
+### Model ###
+
 ### Training ###
 
 COLOR_EPOCH = "#BD1376"

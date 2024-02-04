@@ -6,6 +6,9 @@ from datasets.dSentences.dSentencesDataset import dSentencesDataset
 
 from torch.utils.data import random_split, DataLoader
 
+from VectorQuantizer import VectorQuantizer
+from GumbelQuantizer import GumbelQuantizer
+
 from Shelgon import Shelgon
 
 from transformers import BertTokenizer
@@ -53,16 +56,28 @@ def main():
 
     from transformers.utils import logging
     logging.set_verbosity(40)
-    if VQ_CODEBOOK_INIT_VALUES_PATH is not None:
-        vq_codebook_init_values = torch.load(VQ_CODEBOOK_INIT_VALUES_PATH)["codebook_init_values"]
-    else: 
-        vq_codebook_init_values = None
+    if VQ_MODE == "VectorQuantizer":
+        if VQ_CODEBOOK_INIT_VALUES_PATH is not None:
+            vq_codebook_init_values = torch.load(VQ_CODEBOOK_INIT_VALUES_PATH)["codebook_init_values"]
+        else: 
+            vq_codebook_init_values = None
+        vector_quantizer = VectorQuantizer(
+            n_e=VQ_N_E, e_dim=VQ_E_DIM, beta=VQ_BETA, 
+            vq_codebook_init_values=vq_codebook_init_values
+        )
+    elif VQ_MODE == "GumbelQuantizer":
+        vector_quantizer = GumbelQuantizer(enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM)
+    else:
+        raise ValueError(f"{VQ_MODE} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
+    
     model = Shelgon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
+        # vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
+        vector_quantizer=vector_quantizer,
         decoder_model_name=DECODER_MODEL_NAME,
-        from_pretrained_bagon=FROM_PRETRAINED_BAGON,
-        vq_codebook_init_values=vq_codebook_init_values
+        from_pretrained_bagon=FROM_PRETRAINED_BAGON
+        # ,
+        # vq_codebook_init_values=vq_codebook_init_values
     ).to(device)
     model.compile()
     model.set_mode(MODEL_MODE)

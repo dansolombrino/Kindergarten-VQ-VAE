@@ -41,6 +41,8 @@ from wandb.wandb_run import Run
 
 from torch import save
 
+from math import isclose
+
 def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
     mask = input_ids == 0
@@ -74,7 +76,9 @@ def step(
 ):
     sentences = batch["sentence"]
     latent_classes_labels = batch["latent_classes_labels"]
-    tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
+    # tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
+    # NOTE padding to max length is needed when using Gumbel-Softmax
+    tokenized = tokenizer(sentences, return_tensors="pt", padding="max_length", max_length=12, add_special_tokens=tokenizer_add_special_tokens)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
@@ -161,12 +165,13 @@ def end_of_epoch_print(
 ):
     epoch_str = f"[bold {COLOR_EPOCH}]{epoch:03d}[/bold {COLOR_EPOCH}] | " if print_epoch else "    | "
     suffix_str = "\n" if print_new_line else ""
+    perp_str = f"perp: [bold {stat_color}] {stats_stage_run['metric_perp_run']:08.6f}[/bold {stat_color}] {stat_emojis[3] if stats_stage_best['metric_perp_is_best'] else '  '} | " if not isclose(stats_stage_run['metric_perp_run'], -69) else ""
 
     console.print(
         epoch_str  + \
         f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
         f"loss_vq: [bold {stat_color}] {stats_stage_run['loss_vq_run']:08.6f}[/bold {stat_color}] {stat_emojis[0] if stats_stage_best['loss_vq_is_best'] else '  '} | " + \
-        f"perp: [bold {stat_color}] {stats_stage_run['metric_perp_run']:08.6f}[/bold {stat_color}] {stat_emojis[3] if stats_stage_best['metric_perp_is_best'] else '  '} | " + \
+        perp_str + \
         f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
         suffix_str
     )

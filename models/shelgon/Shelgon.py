@@ -8,6 +8,7 @@ from torch.nn.functional import softmax
 from transformers import EncoderDecoderModel
 
 from models.shelgon.VectorQuantizer import VectorQuantizer
+from models.shelgon.GumbelQuantizer import GumbelQuantizer
 
 from common.consts import *
 
@@ -25,10 +26,9 @@ SUPPORTED_MODEL_MODES = ["full", "dec-head-ft", "enc-head-ft-dec-head-ft", "vq-f
 class Shelgon(Bagon):
     def __init__(
         self, encoder_model_name: str, 
-        vq_n_e: int, vq_e_dim: int, vq_beta: float,
+        vector_quantizer: Union[VectorQuantizer, GumbelQuantizer],
         decoder_model_name: str,
-        from_pretrained_bagon: Union[str, None],
-        vq_codebook_init_values: Union[Tensor, None]
+        from_pretrained_bagon: Union[str, None]
     ):
         # self.encoder and self.decoder are inherited from Bagon!
         super(Shelgon, self).__init__(
@@ -36,9 +36,7 @@ class Shelgon(Bagon):
             decoder_model_name=decoder_model_name
         )
         
-        self.vector_quantizer: VectorQuantizer = VectorQuantizer(
-            n_e=vq_n_e, e_dim=vq_e_dim, beta=vq_beta, vq_codebook_init_values=vq_codebook_init_values
-        )
+        self.vector_quantizer: Union[VectorQuantizer, GumbelQuantizer] = vector_quantizer
         
         if from_pretrained_bagon is not None:
             bagon_checkpoint = torch.load(from_pretrained_bagon)
@@ -49,13 +47,22 @@ class Shelgon(Bagon):
         self.model_mode = "full"
         
 
-    def forward(self, input_ids, attention_mask, device):
+    def forward(self, input_ids: Tensor, attention_mask: Tensor, device, is_training: bool):
         
         embeds = self.encoder(input_ids, attention_mask=attention_mask).last_hidden_state
 
         assert embeds.shape[-1] == self.vector_quantizer.e_dim, "embedding dim of encoder output must match e_dim (for now)!"
 
-        vq_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantizer(embeds, device)
+        # NOTE ugly AF, TODO uniform inputs and outputs of the two classes to avoid using the if statement
+        perplexity = -69
+        if type(self.vector_quantizer).__name__ == "VectorQuantizer":
+            vq_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantizer.forward(embeds, device)
+        
+        elif type(self.vector_quantizer).__name__ == "GumbelQuantizer":
+            z_q, vq_loss, min_encoding_indices = self.vector_quantizer.forward(embeds, is_training)
+        
+        else:
+            raise ValueError(f"{type(self.vector_quantizer).__name__} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
 
         # reconstructed_logits = self.decoder(inputs_embeds=z_q).logits
         reconstructed_logits = self.decoder(encoder_hidden_states=z_q, input_ids=input_ids, attention_mask=attention_mask).logits
