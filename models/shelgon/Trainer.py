@@ -71,6 +71,7 @@ def step(
     loss_perp_rescale_factor: float, loss_perp_weight: float,
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
+    stage: str, 
     console: Console
 
 ):
@@ -83,7 +84,7 @@ def step(
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
     loss_vq_step: Tensor; metric_perp_step: Tensor; min_encoding_indices: Tensor; logits_recon: Tensor
-    loss_vq_step, metric_perp_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device)
+    loss_vq_step, metric_perp_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device, stage == "train")
 
     # input and targets reshaped to use cross-entropy with sequential data, 
     # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
@@ -325,6 +326,7 @@ def train(
                 loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
+                stage="train",
                 console=console
             )
 
@@ -372,6 +374,7 @@ def train(
                     loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
+                    stage="val",
                     console=console
                 )
 
@@ -440,6 +443,7 @@ def test(
                 loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
+                stage="test",
                 console=console
             )
 

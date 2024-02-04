@@ -54,12 +54,15 @@ class Shelgon(Bagon):
         assert embeds.shape[-1] == self.vector_quantizer.e_dim, "embedding dim of encoder output must match e_dim (for now)!"
 
         # NOTE ugly AF, TODO uniform inputs and outputs of the two classes to avoid using the if statement
-        perplexity = -69
         if type(self.vector_quantizer).__name__ == "VectorQuantizer":
             vq_loss, z_q, perplexity, min_encodings, min_encoding_indices = self.vector_quantizer.forward(embeds, device)
         
         elif type(self.vector_quantizer).__name__ == "GumbelQuantizer":
             z_q, vq_loss, min_encoding_indices = self.vector_quantizer.forward(embeds, is_training)
+
+            # NOTE not the actual perplexity computation, but still informative
+            # according to https://stats.stackexchange.com/questions/600948/codebook-perplexity-in-vq-vae
+            perplexity = torch.numel(torch.unique(min_encoding_indices.cpu()))
         
         else:
             raise ValueError(f"{type(self.vector_quantizer).__name__} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
