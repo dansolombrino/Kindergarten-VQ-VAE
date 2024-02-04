@@ -11,6 +11,8 @@ from transformers import BertTokenizer
 from transformers.utils import logging; logging.set_verbosity(40)
 
 from models.shelgon.Shelgon import Shelgon
+from models.shelgon.VectorQuantizer import VectorQuantizer
+from models.shelgon.GumbelQuantizer import GumbelQuantizer
 
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn,TimeElapsedColumn, TimeRemainingColumn
 from rich.style import Style
@@ -21,6 +23,8 @@ from torch import Tensor
 import json
 
 import os
+
+from common.consts import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -38,15 +42,41 @@ ENCODER_MODEL_NAME = "bert-base-uncased"
 VQ_N_E = 9
 VQ_E_DIM = 768
 VQ_BETA = 0.1
+VQ_MODE = "GumbelQuantizer"
+if VQ_MODE == "VectorQuantizer":
+
+    VQ_CODEBOOK_INIT_VALUES_PATH = None
+
+    if VQ_CODEBOOK_INIT_VALUES_PATH is not None:
+        vq_codebook_init_values = torch.load(VQ_CODEBOOK_INIT_VALUES_PATH)["codebook_init_values"]
+    else: 
+        vq_codebook_init_values = None
+    vector_quantizer = VectorQuantizer(
+        n_e=VQ_N_E, e_dim=VQ_E_DIM, beta=VQ_BETA, 
+        vq_codebook_init_values=vq_codebook_init_values
+    )
+elif VQ_MODE == "GumbelQuantizer":
+
+    ENC_OUT_SIZE = 768
+    VQ_TEMPERATURE = 1
+    VQ_KL_DIV_SCALE = 1
+
+    vector_quantizer = GumbelQuantizer(
+        enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM,
+        temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE
+    )
+else:
+    raise ValueError(f"{VQ_MODE} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
+
 DECODER_MODEL_NAME = "bert-base-uncased"
 FROM_PRETRAINED_BAGON = None
 model = Shelgon(
     encoder_model_name=ENCODER_MODEL_NAME, 
-    vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
+    vector_quantizer=vector_quantizer,
     decoder_model_name=DECODER_MODEL_NAME,
     from_pretrained_bagon=FROM_PRETRAINED_BAGON
 ).to(device)
-RUN_ID = "xyz"
+RUN_ID = "2024_02_04_12_30_10"
 CKPT_PATH = f"./runs/Shelgon/{RUN_ID}/shelgon_ckpt_loss_recon_val_best.pth"
 model.load_state_dict(torch.load(CKPT_PATH)["model_state_dict"])
 model.compile()
@@ -104,7 +134,7 @@ for batch in list(dl)[:]:
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    _, min_encoding_indices, _ = model.forward(input_ids, attention_mask, device)
+    _, _, min_encoding_indices, _ = model.forward(input_ids, attention_mask, device, False)
 
     prg.reset(batch_stats_task)
 
