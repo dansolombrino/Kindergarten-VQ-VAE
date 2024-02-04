@@ -12,9 +12,8 @@ SUPPORTED_VQ_MODES = ["VectorQuantizer", "GumbelQuantizer"]
 
 ### Training ###
 
-COLOR_RUN_ID = "cyan"
-
 COLOR_EPOCH = "#BD1376"
+COLOR_RUN_ID = COLOR_EPOCH
 COLOR_TRAIN = "#2A9CDA"
 COLOR_VAL   = "#6A16A5"
 COLOR_TEST  = "#914418"

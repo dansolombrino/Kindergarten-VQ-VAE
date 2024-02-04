@@ -113,7 +113,7 @@ def main():
     )
 
     run_id = datetime.now().strftime(RUN_ID_TIMESTAMP_FORMAT)
-    console.print(f"[bold {COLOR_RUN_ID}]Run ID: {run_id}\n")
+    console.print(f"Run ID: [bold {COLOR_RUN_ID}]{run_id}\n")
     run_path = f"{RUNS_DIR}/{run_id}"
     os.makedirs(run_path) if not os.path.exists(run_path) else None
     
