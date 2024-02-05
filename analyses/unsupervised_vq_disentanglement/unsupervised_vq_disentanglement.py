@@ -26,14 +26,30 @@ import os
 
 from common.consts import *
 
+from torch.utils.data import random_split
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SENTENCES_PATH = "./data/dSentences/dSentences_sentences.npy"
 LATENT_CLASSES_LABELS_PATH = "./data/dSentences/dSentences_latent_classes_labels.npy"
 ds = dSentencesDataset(SENTENCES_PATH, LATENT_CLASSES_LABELS_PATH)
 
-BATCH_SIZE = 2048
-dl = DataLoader(ds, batch_size=BATCH_SIZE)
+TRAIN_SPLIT_PCT = 0.6
+VAL_SPLIT_PCT = 0.2
+TEST_SPLIT_PCT = 0.2
+ds_train_len = int(len(ds) * TRAIN_SPLIT_PCT)
+ds_val_len = int(len(ds) * VAL_SPLIT_PCT)
+ds_test_len = len(ds) - ds_train_len - ds_val_len
+ds_gen = torch.Generator()
+ds_gen.manual_seed(DS_GEN_SEED)
+ds_train, ds_val, ds_test = random_split(ds, (ds_train_len, ds_val_len, ds_test_len), ds_gen)
+
+BATCH_SIZE = 512
+NUM_WORKERS = 0
+PIN_MEMORY = True
+dl_train = DataLoader(ds_train, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, shuffle=True )
+dl_val   = DataLoader(ds_val  , batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, shuffle=False)
+dl_test  = DataLoader(ds_test , batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=PIN_MEMORY, shuffle=False)
 
 TOKENIZER_NAME = "bert-base-uncased"
 tokenizer: BertTokenizer = BertTokenizer.from_pretrained(TOKENIZER_NAME)
@@ -60,10 +76,12 @@ elif VQ_MODE == "GumbelQuantizer":
     ENC_OUT_SIZE = 768
     VQ_TEMPERATURE = 1
     VQ_KL_DIV_SCALE = 1
+    VQ_STRAIGHT_THROUGH = False
 
     vector_quantizer = GumbelQuantizer(
         enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM,
-        temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE
+        temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE,
+        straight_through=VQ_STRAIGHT_THROUGH
     )
 else:
     raise ValueError(f"{VQ_MODE} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
@@ -110,10 +128,6 @@ prg = Progress(
     console=console
 )
 
-prg.start()
-ds_stats_task    = prg.add_task("[bold #C71585]Compiling VQ codebook distributions for dataset", total=len(dl))
-batch_stats_task = prg.add_task("[bold #FF4500]Compiling VQ codebook distributions for batch"  , total=BATCH_SIZE)
-
 # dl = [
 #     {
 #         "sentence": [
@@ -126,56 +140,70 @@ batch_stats_task = prg.add_task("[bold #FF4500]Compiling VQ codebook distributio
 
 seen_v_is = set()
 
-for batch in list(dl)[:]:
-    
-    sentences = batch["sentence"]
+LIM_BATCHES_PCT = 0.1
+LIM_BATCHES_TRAIN_PCT = LIM_BATCHES_PCT
+LIM_BATCHES_VAL_PCT   = LIM_BATCHES_PCT
+LIM_BATCHES_TEST_PCT  = LIM_BATCHES_PCT
+n_batches_train = int(len(dl_train) * LIM_BATCHES_TRAIN_PCT)
+n_batches_val   = int(len(dl_val  ) * LIM_BATCHES_VAL_PCT)
+n_batches_test  = int(len(dl_test ) * LIM_BATCHES_TEST_PCT)
+n_batches_tot = n_batches_train + n_batches_val + n_batches_test
 
-    tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=False)
-    input_ids: Tensor = tokenized.input_ids.to(device)
-    attention_mask: Tensor = tokenized.attention_mask.to(device)
+prg.start()
+ds_stats_task    = prg.add_task("[bold #C71585]Compiling VQ codebook distributions for dataset", total=n_batches_tot)
+batch_stats_task = prg.add_task("[bold #FF4500]Compiling VQ codebook distributions for batch"  , total=BATCH_SIZE)
 
-    _, _, min_encoding_indices, _ = model.forward(input_ids, attention_mask, device, False)
+for dl, n_batches in zip([dl_train, dl_val, dl_test], [n_batches_train, n_batches_val, n_batches_test]):
+    for batch in list(dl)[:n_batches]:
+        
+        sentences = batch["sentence"]
 
-    prg.reset(batch_stats_task)
+        tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=False)
+        input_ids: Tensor = tokenized.input_ids.to(device)
+        attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    for s, ids, v_i in zip(sentences, input_ids, min_encoding_indices):
+        _, _, min_encoding_indices, _ = model.forward(input_ids, attention_mask, device, False)
 
-        v_i = v_i.flatten().tolist()
-        # console.print(f"sentence           : {s}")
-        # console.print(f"token ids          : {ids.tolist()}")
-        # console.print(f"codebook vector ids: {v_i}")
+        prg.reset(batch_stats_task)
 
-        s_i = 0
+        for s, ids, v_i in zip(sentences, input_ids, min_encoding_indices):
 
-        for word in s.split(" "):
+            v_i = v_i.flatten().tolist()
+            # console.print(f"sentence           : {s}")
+            # console.print(f"token ids          : {ids.tolist()}")
+            # console.print(f"codebook vector ids: {v_i}")
 
-            tokens = tokenizer(word, return_tensors="pt", padding=False, add_special_tokens=False).input_ids.flatten().tolist()
+            s_i = 0
 
-            v_is = []
+            for word in s.split(" "):
 
-            for j in range(len(tokens)):
-                v_is.append(v_i[s_i + j])
-                vq_words_distrib[v_is[-1]].append(word) # done on all words
-                seen_v_is.add(v_i[s_i + j])
+                tokens = tokenizer(word, return_tensors="pt", padding=False, add_special_tokens=False).input_ids.flatten().tolist()
+
+                v_is = []
+
+                for j in range(len(tokens)):
+                    v_is.append(v_i[s_i + j])
+                    vq_words_distrib[v_is[-1]].append(word) # done on all words
+                    seen_v_is.add(v_i[s_i + j])
 
 
-            s_i += len(tokens)
-            
-            # console.print(f"{word} --> {tokens} --> {str(v_is)}")
-
-            if word in WORDS_OF_INTEREST:
-                if len(tokens) != 1:
-                    print(f"(len(tokens)) = {len(tokens)} for word {word}")
+                s_i += len(tokens)
                 
-                if len(v_is) != 1:
-                    print(f"(len(v_is)) = {len(v_is)} for word {word}")
-                
-                words_of_interest_vq_distrib[word].append(v_is[0])
-                # vq_words_distrib[v_is[0]].add(word) # done only on words of interest
+                # console.print(f"{word} --> {tokens} --> {str(v_is)}")
 
-        # console.print()
-        prg.advance(batch_stats_task, 1)
-        prg.advance(ds_stats_task, (1/BATCH_SIZE))
+                if word in WORDS_OF_INTEREST:
+                    if len(tokens) != 1:
+                        print(f"(len(tokens)) = {len(tokens)} for word {word}")
+                    
+                    if len(v_is) != 1:
+                        print(f"(len(v_is)) = {len(v_is)} for word {word}")
+                    
+                    words_of_interest_vq_distrib[word].append(v_is[0])
+                    # vq_words_distrib[v_is[0]].add(word) # done only on words of interest
+
+            # console.print()
+            prg.advance(batch_stats_task, 1)
+            prg.advance(ds_stats_task, (1/BATCH_SIZE))
 
 
 RESULTS_DIR = f"./analyses/unsupervised_vq_disentanglement/results/{RUN_ID}"
