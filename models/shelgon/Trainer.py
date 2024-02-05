@@ -256,8 +256,8 @@ def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stag
     if stats_train_best["loss_vq_is_best"]:
         _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_vq_{stage}_best.pth", stage)
     
-    if stats_train_best["metric_perp_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_perp_{stage}_best.pth", stage)
+    # if stats_train_best["metric_perp_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_perp_{stage}_best.pth", stage)
     
     # if stats_train_best["loss_full_is_best"]:
     #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
