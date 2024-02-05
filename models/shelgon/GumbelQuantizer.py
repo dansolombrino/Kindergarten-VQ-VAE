@@ -25,17 +25,14 @@ class GumbelQuantizer(nn.Module):
         enc_out_size, 
         n_embed, embedding_dim, 
         temperature: float, kl_div_scale: float, 
-        straight_through=False
+        straight_through: bool
     ):
         super().__init__()
 
-        # self.embedding_dim = embedding_dim
         self.e_dim = embedding_dim
         self.n_embed = n_embed
 
         self.straight_through = straight_through
-        # self.temperature = 1.0
-        # self.kld_scale = 5e-4
         self.temperature = temperature
         self.kld_scale = kl_div_scale
 

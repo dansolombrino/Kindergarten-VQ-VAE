@@ -68,19 +68,17 @@ def main():
     elif VQ_MODE == "GumbelQuantizer":
         vector_quantizer = GumbelQuantizer(
             enc_out_size=ENC_OUT_SIZE, n_embed=VQ_N_E, embedding_dim=VQ_E_DIM,
-            temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE
+            temperature=VQ_TEMPERATURE, kl_div_scale=VQ_KL_DIV_SCALE,
+            straight_through=VQ_STRAIGHT_THROUGH
         )
     else:
         raise ValueError(f"{VQ_MODE} vector quantizer mode NOT supported. Supported modalities: {', '.join(SUPPORTED_VQ_MODES)}")
     
     model = Shelgon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        # vq_n_e=VQ_N_E, vq_e_dim=VQ_E_DIM, vq_beta=VQ_BETA,
         vector_quantizer=vector_quantizer,
         decoder_model_name=DECODER_MODEL_NAME,
         from_pretrained_bagon=FROM_PRETRAINED_BAGON
-        # ,
-        # vq_codebook_init_values=vq_codebook_init_values
     ).to(device)
     model.compile()
     model.set_mode(MODEL_MODE)
