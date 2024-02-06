@@ -23,21 +23,21 @@ class SentenceDiscretizer(nn.Module):
 
         # singular, plural --> "car", "cars"
         self.gram_num_obj_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
 
         # interrogative, affirmative --> sentence is a question, sentence is an affirmation
         self.sentence_type_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
 
         self.gender_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
         
         # singular, plural --> "I", "we"
         self.gram_num_subject_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
 
         # 1st, 2nd or 3rd person
@@ -47,7 +47,7 @@ class SentenceDiscretizer(nn.Module):
         
         # affirmative, negative
         self.sentence_neg_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
 
         # past, present, future
@@ -57,10 +57,8 @@ class SentenceDiscretizer(nn.Module):
         
         # progressive, not progressie --> "eat", "eating"
         self.style_discretizer = GenerativeFactorDiscretizer(
-            word_emb_size=word_emb_size, gen_factor_num_values=2
+            word_emb_size=word_emb_size, gen_factor_num_values=3
         )
-
-        self.gen_factors_padding = nn.ConstantPad1d((0, 1), 0)
 
         self.latent_factors_contract = nn.Conv1d(
             in_channels=self.num_latent_gen_factors, 
@@ -98,14 +96,14 @@ class SentenceDiscretizer(nn.Module):
 
         gen_factors_logits = torch.stack(
             [
-                self.gen_factors_padding(gram_num_obj_logits),
-                self.gen_factors_padding(sentence_type_logits),
-                self.gen_factors_padding(gender_logits),
-                self.gen_factors_padding(gram_num_subject_logits),
+                gram_num_obj_logits,
+                sentence_type_logits,
+                gender_logits,
+                gram_num_subject_logits,
                 gram_num_person_logits,
-                self.gen_factors_padding(sentence_neg_logits),
+                sentence_neg_logits,
                 tense_logits,
-                self.gen_factors_padding(style_logits)
+                style_logits
             ],
             dim=-1
         )
