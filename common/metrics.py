@@ -5,7 +5,7 @@ from torch import Tensor
 
 import torch
 
-def seq_acc(input: Tensor, target: Tensor) -> float:
+def seq_acc(input: Tensor, target: Tensor):
 
     assert input.shape == target.shape, "input and target shapes must match"
 
@@ -27,12 +27,13 @@ def seq_acc(input: Tensor, target: Tensor) -> float:
 
     # print(f"sum: {sum}\n")
 
-    acc = sum / input.numel()
+    acc_per_batch = sum / input.numel()
 
     # print(f"acc: {acc}\n")
-    
 
-    return acc
+    acc_per_sentence = torch.mean(mask.float(), dim=-1)
+
+    return acc_per_batch, acc_per_sentence
 
 
 def main():
