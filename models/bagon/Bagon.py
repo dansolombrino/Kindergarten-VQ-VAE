@@ -2,8 +2,6 @@ from rich import print
 
 import torch.nn as nn
 import torch
-from torch import argmax
-from torch.nn.functional import softmax
 
 from transformers import EncoderDecoderModel
 
@@ -22,23 +20,34 @@ class Bagon(nn.Module):
     ):
         super(Bagon, self).__init__()
 
-        encoder_decoder_model: EncoderDecoderModel = EncoderDecoderModel.from_encoder_decoder_pretrained(encoder_model_name, decoder_model_name)
+        enc_dec: EncoderDecoderModel
+        enc_dec = EncoderDecoderModel.from_encoder_decoder_pretrained(
+            encoder_model_name, decoder_model_name
+        )
 
-        self.encoder = encoder_decoder_model.encoder
+        self.encoder = enc_dec.encoder
     
-        self.decoder = encoder_decoder_model.decoder
+        self.decoder = enc_dec.decoder
 
+
+    def forward(
+        self, 
+        encoder_input_ids, encoder_attention_mask,
+        decoder_input_ids, decoder_attention_mask
+    ):
         
+        encoder_output = self.encoder(
+            encoder_input_ids, attention_mask=encoder_attention_mask
+        ).last_hidden_state
 
-    def forward(self, input_ids, attention_mask):
-        
-        embeds = self.encoder(input_ids, attention_mask=attention_mask).last_hidden_state
-
-        # reconstructed_logits = self.decoder(inputs_embeds=embeds).logits
-        reconstructed_logits = self.decoder(encoder_hidden_states=embeds, input_ids=input_ids, attention_mask=attention_mask).logits
+        reconstructed_logits = self.decoder(
+            encoder_hidden_states=encoder_output, 
+            input_ids=decoder_input_ids, attention_mask=decoder_attention_mask
+        ).logits
 
         return reconstructed_logits
     
+
     def model_params_summary_dict(self):
         return {
             "encoder": {
@@ -67,6 +76,7 @@ class Bagon(nn.Module):
         
         return
     
+
     def set_mode(self, model_mode: str):
         if model_mode == "full":
             return
@@ -108,18 +118,18 @@ def main():
     from transformers.utils import logging
     logging.set_verbosity(40)
 
-    from transformers import BertTokenizer
+    from transformers import BertTokenizerFast
+
+    from torch import argmax
+    from torch.nn.functional import softmax
 
     encoder_model_name = "bert-base-uncased"
-    vq_n_e = 10
-    vq_e_dim = 768
-    vq_beta = 0.69
     decoder_model_name = "bert-base-uncased"
 
-    model = Bagon(encoder_model_name, vq_n_e, vq_e_dim, vq_beta, decoder_model_name)
+    model = Bagon(encoder_model_name, decoder_model_name)
 
     tokenizer_name = "bert-base-uncased"
-    tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
+    tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(tokenizer_name)
 
     text = [
         "Today is an amazing day",
@@ -127,17 +137,24 @@ def main():
         "I am totally ready for this great adventure"
     ]
     
-    text_input_ids = tokenizer(text, return_tensors="pt", padding=True).input_ids
+    tokenized = tokenizer(text, return_tensors="pt", padding=True)
+    input_ids = tokenized.input_ids
+    attention_mask = tokenized.attention_mask
 
-    text_reconstructed_ids = model.forward(text_input_ids)
+    recon_logits = model.forward(
+        encoder_input_ids=input_ids, encoder_attention_mask=attention_mask,
+        decoder_input_ids=input_ids, decoder_attention_mask=attention_mask
+    )
 
-    for i, (a, b, c) in enumerate(zip(text_input_ids, text_reconstructed_ids, text)):
+    recon_ids = argmax(softmax(recon_logits, dim=-1), dim=-1)
+
+    for i, (a, b, c) in enumerate(zip(input_ids, recon_ids, text)):
         print(f"sentence id: {i}")
         print(f"input_ids: {a}")
-        print(f"reconstructed_ids: {b}")
+        print(f"recon_ids: {b}")
 
         print(f"text: {c}")
-        print(f"text_reconstructed: {' '.join(tokenizer.convert_ids_to_tokens(b.squeeze(0)))}")
+        print(f"text_reconstructed: {' '.join(tokenizer.decode(b))}")
         
         print("\n\n")
 

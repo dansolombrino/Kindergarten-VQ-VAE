@@ -41,6 +41,8 @@ from wandb.wandb_run import Run
 
 from torch import save
 
+from common.tensor_utils import replace_pct_rand_values
+
 def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
     mask = input_ids == 0
@@ -62,27 +64,27 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Bagon, 
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    encoder_perturb_pct: float, decoder_perturb_pct: float,
     opt: Optimizer, 
     lr_sched: LRScheduler,
     batch: list, vocab_size: int,
     console: Console
 
 ):
-    # TODO NOTE remove the hardcoded max length to 14, if another dataset is used
-    # TODO NOTE or improve its handling even if dSentences will be the only dataset used
-    # tokenized = tokenizer(batch, return_tensors="pt", padding="max_length", max_length=14)
     tokenized = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    logits_recon: Tensor = model.forward(input_ids, attention_mask)
+    encoder_input_ids: Tensor = replace_pct_rand_values(input_ids, encoder_perturb_pct, 0, vocab_size)
+    decoder_input_ids: Tensor = replace_pct_rand_values(input_ids, decoder_perturb_pct, 0, vocab_size)
 
-    # input and targets reshaped to use cross-entropy with sequential data, 
-    # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
-    # loss_recon_step = cross_entropy(
-    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
-    # )
+    logits_recon: Tensor = model.forward(
+        encoder_input_ids, attention_mask, decoder_input_ids, attention_mask
+    )
+
+    # input and targets reshaped to use KL divergence with sequential data, as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
     loss_recon_step = kl_div(
         input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
         target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
@@ -90,7 +92,7 @@ def step(
     )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step = seq_acc(recon_ids, input_ids)
+    metric_acc_step, metric_acc_per_sentence = seq_acc(recon_ids, input_ids)
 
     loss_full_step: Tensor = loss_recon_step
 
@@ -231,6 +233,8 @@ def train(
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
     model: Bagon, 
     tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
+    encoder_perturb_train_pct: float, encoder_perturb_val_pct: float, encoder_perturb_test_pct: float,
+    decoder_perturb_train_pct: float, decoder_perturb_val_pct: float, decoder_perturb_test_pct: float,
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
@@ -271,6 +275,7 @@ def train(
                 device=device,
                 model=model, 
                 tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                encoder_perturb_pct=encoder_perturb_train_pct, decoder_perturb_pct=decoder_perturb_train_pct,
                 opt=opt, 
                 lr_sched=lr_sched,
                 batch=batch, vocab_size=vocab_size,
@@ -315,6 +320,7 @@ def train(
                     device=device,
                     model=model,
                     tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                    encoder_perturb_pct=encoder_perturb_val_pct, decoder_perturb_pct=decoder_perturb_val_pct,
                     opt=None, 
                     lr_sched=None,
                     batch=batch, vocab_size=vocab_size,
@@ -346,7 +352,9 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Bagon, 
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    encoder_perturb_test_pct: float, decoder_perturb_test_pct: float,
     decoded_sentences: list,
     vocab_size: int,
     epoch: int,
@@ -377,6 +385,7 @@ def test(
                 device=device,
                 model=model,
                 tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                encoder_perturb_pct=encoder_perturb_test_pct, decoder_perturb_pct=decoder_perturb_test_pct,
                 opt=None, 
                 lr_sched=None,
                 batch=batch, vocab_size=vocab_size,
