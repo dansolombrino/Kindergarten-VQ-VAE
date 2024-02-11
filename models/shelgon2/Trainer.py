@@ -65,7 +65,7 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Shelgon2, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Shelgon2, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, tokenizer_max_length: int,
     opt: Optimizer, 
     loss_recon_rescale_factor: float, loss_recon_weight: float,
     loss_latent_rescale_factor: float, loss_latent_weight: float,
@@ -81,8 +81,11 @@ def step(
     input_latent_classes_one_hot: Tensor = batch["latent_classes_one_hot"]
     input_latent_classes_one_hot = input_latent_classes_one_hot.to(device)
 
-    # NOTE padding to max length is needed when using Gumbel-Softmax # TODO make max_length parametric
-    tokenized = tokenizer(sentences, return_tensors="pt", padding="max_length", max_length=14, add_special_tokens=tokenizer_add_special_tokens)
+    tokenized = tokenizer(
+        sentences, return_tensors="pt", 
+        padding="max_length", max_length=tokenizer_max_length, 
+        add_special_tokens=tokenizer_add_special_tokens
+    )
     input_ids: Tensor = tokenized.input_ids.to(device)
     attention_mask: Tensor = tokenized.attention_mask.to(device)
 
@@ -230,8 +233,8 @@ def decode_sentences(
     console: Console
 ):
 
-    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids)
-    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids)
+    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids, skip_special_tokens=True)
+    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids, skip_special_tokens=True)
 
     for in_sentence, recon_sentence, sentence_acc, sentence_latent_acc, in_labels, recon_labels, in_one_hot, recon_one_hot in zip(
         input_ids_decoded, recon_ids_decoded,
@@ -288,18 +291,18 @@ def _save_ckpt(model: Shelgon2, checkpoint_file_path: str, stage: str):
 def checkpoint(stats_train_best: dict, model: Shelgon2, checkpoint_dir: str, stage: str):
     
     if stats_train_best["loss_recon_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_recon_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon2_ckpt_loss_recon_{stage}_best.pth", stage)
     
     if stats_train_best["loss_latent_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_latent_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon2_ckpt_loss_latent_{stage}_best.pth", stage)
 
 
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Shelgon2, 
-    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
+    model: Shelgon2, mask_pct_train: float, mask_pct_val: float,
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, tokenizer_max_length: int,
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, 
     loss_recon_rescale_factor: float, loss_recon_weight: float, 
@@ -345,8 +348,8 @@ def train(
 
             stats_step, input_ids, recon_ids, input_latent_classes_labels, recon_latent_classes_labels, input_latent_classes_one_hot, recon_latent_classes_logits = step(
                 device=device,
-                model=model, 
-                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                model=model, mask_pct=mask_pct_train,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens, tokenizer_max_length=tokenizer_max_length,
                 opt=opt, 
                 loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
                 loss_latent_rescale_factor=loss_latent_rescale_factor, loss_latent_weight=loss_latent_weight,
@@ -399,8 +402,8 @@ def train(
 
                 stats_step, input_ids, recon_ids, input_latent_classes_labels, recon_latent_classes_labels, input_latent_classes_one_hot, recon_latent_classes_logits = step(
                     device=device,
-                    model=model,
-                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                    model=model, mask_pct=mask_pct_val,
+                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens, tokenizer_max_length=tokenizer_max_length,
                     opt=None, 
                     loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
                     loss_latent_rescale_factor=loss_latent_rescale_factor, loss_latent_weight=loss_latent_weight,
@@ -442,7 +445,8 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Shelgon2, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    model: Shelgon2, mask_pct: float,
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, tokenizer_max_length: int,
     loss_recon_rescale_factor: float, loss_recon_weight: float,
     loss_latent_rescale_factor: float, loss_latent_weight: float,
     decoded_sentences: list,
@@ -473,8 +477,8 @@ def test(
 
             stats_step, input_ids, recon_ids, input_latent_classes_labels, recon_latent_classes_labels, input_latent_classes_one_hot, recon_latent_classes_logits = step(
                 device=device,
-                model=model,
-                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                model=model, mask_pct=mask_pct,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens, tokenizer_max_length=tokenizer_max_length,
                 opt=None, 
                 loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight, 
                 loss_latent_rescale_factor=loss_latent_rescale_factor, loss_latent_weight=loss_latent_weight,

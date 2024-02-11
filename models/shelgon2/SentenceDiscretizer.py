@@ -65,13 +65,20 @@ class SentenceDiscretizer(nn.Module):
             out_channels=sentence_len, kernel_size=1
         )
 
-    def forward(self, embedded_sentences: Tensor):
+    def forward(
+        self, embedded_sentences: Tensor,
+        override_gram_num_obj_logits: Tensor = None,
+        override_sentence_type_logits: Tensor = None,
+        override_gender_logits: Tensor = None,
+        override_gram_num_subject_logits: Tensor = None,
+        override_gram_num_person_logits: Tensor = None,
+    ):
 
-        gram_num_obj_emb, gram_num_obj_logits, gram_num_obj_label = self.gram_num_obj_discretizer.forward(embedded_sentences)
-        sentence_type_emb, sentence_type_logits, sentence_type_label = self.sentence_type_discretizer.forward(embedded_sentences)
-        gender_emb, gender_logits, gender_label = self.gender_discretizer.forward(embedded_sentences)
-        gram_num_subject_emb, gram_num_subject_logits, gram_num_subject_label = self.gram_num_subject_discretizer.forward(embedded_sentences)
-        gram_num_person_emb, gram_num_person_logits, gram_num_person_label = self.gram_num_person_discretizer.forward(embedded_sentences)
+        gram_num_obj_emb, gram_num_obj_logits, gram_num_obj_label = self.gram_num_obj_discretizer.forward(embedded_sentences, override_gram_num_obj_logits)
+        sentence_type_emb, sentence_type_logits, sentence_type_label = self.sentence_type_discretizer.forward(embedded_sentences, override_sentence_type_logits)
+        gender_emb, gender_logits, gender_label = self.gender_discretizer.forward(embedded_sentences, override_gender_logits)
+        gram_num_subject_emb, gram_num_subject_logits, gram_num_subject_label = self.gram_num_subject_discretizer.forward(embedded_sentences, override_gram_num_subject_logits)
+        gram_num_person_emb, gram_num_person_logits, gram_num_person_label = self.gram_num_person_discretizer.forward(embedded_sentences, override_gram_num_person_logits)
         sentence_neg_emb, sentence_neg_logits, sentence_neg_label = self.sentence_neg_discretizer.forward(embedded_sentences)
         tense_emb, tense_logits, tense_label = self.tense_discretizer.forward(embedded_sentences)
         style_emb, style_logits, style_label = self.style_discretizer.forward(embedded_sentences)

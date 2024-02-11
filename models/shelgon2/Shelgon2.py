@@ -11,6 +11,8 @@ from models.bagon.Bagon import Bagon
 
 from models.shelgon2.SentenceDiscretizer import SentenceDiscretizer
 
+from common.tensor_utils import replace_pct_rand_values
+
 SUPPORTED_MODEL_MODES = ["full", "dec-head-ft", "enc-head-ft-dec-head-ft", "vq-ft"]
 
 
@@ -32,18 +34,34 @@ class Shelgon2(Bagon):
         self.model_mode = "full"
         
 
-    def forward(self, input_ids: Tensor, attention_mask: Tensor) -> Tensor:
+    def forward(
+        self, input_ids: Tensor, attention_mask: Tensor,
+        mask_pct: float, 
+        override_gram_num_obj_logits: Tensor = None,
+        override_sentence_type_logits: Tensor = None,
+        override_gender_logits: Tensor = None,
+        override_gram_num_subject_logits: Tensor = None,
+        override_gram_num_person_logits: Tensor = None,
+    ):
         
         enc_out = self.encoder(input_ids, attention_mask=attention_mask)
         
         embedded_words = enc_out.last_hidden_state
         embedded_sentences = enc_out.pooler_output
 
-        discretized_embedded_sentences, latent_factors_logits, latent_factors_labels = self.sentence_discretizer.forward(embedded_sentences)
+        discretized_embedded_sentences, latent_factors_logits, latent_factors_labels = self.sentence_discretizer.forward(
+            embedded_sentences,
+            override_gram_num_obj_logits,
+            override_sentence_type_logits,
+            override_gender_logits,
+            override_gram_num_subject_logits,
+            override_gram_num_person_logits,
+        )
 
         reconstructed_logits = self.decoder(
             encoder_hidden_states=discretized_embedded_sentences, 
-            input_ids=input_ids, 
+            # input_ids=input_ids, 
+            input_ids=replace_pct_rand_values(input_ids, 0.69), 
             attention_mask=attention_mask
         ).logits
 

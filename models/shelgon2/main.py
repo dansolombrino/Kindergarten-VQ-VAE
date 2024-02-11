@@ -129,8 +129,9 @@ def main():
         prg=prg, console=console,
         device=device, 
         dl_train=dl_train, dl_val=dl_val, n_batches_train=n_batches_train, n_batches_val=n_batches_val,
-        model=model, 
+        model=model, mask_pct_train=MASK_PCT_TRAIN, mask_pct_val=MASK_PCT_VAL,
         tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, 
+        tokenizer_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
         n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER, decoded_sentences=decoded_sentences,
         opt=opt, 
         loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT, 
@@ -149,16 +150,16 @@ def main():
         # TODO improve handling of this. 
 
         n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
-        model_best_val_checkpoint = torch.load(f"{run_path}/shelgon_ckpt_loss_recon_val_best.pth")
+        model_best_val_checkpoint = torch.load(f"{run_path}/shelgon2_ckpt_loss_recon_val_best.pth")
         model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
         test(
             prg=prg, console=console,
             device=device,
             dl_test=dl_test, n_batches_test=n_batches_test,
-            model=model, 
+            model=model, mask_pct=MASK_PCT_TEST,
             loss_recon_rescale_factor=LOSS_RECON_RESCALE_FACTOR, loss_recon_weight=LOSS_RECON_WEIGHT,
             loss_latent_rescale_factor=LOSS_LATENT_RESCALE_FACTOR, loss_latent_weight=LOSS_LATENT_WEIGHT,
-            tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
+            tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenizer_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
             decoded_sentences=decoded_sentences,
             vocab_size=VOCAB_SIZE,
             # TODO NOTE handle this in case of resuming from checkpoint!

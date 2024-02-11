@@ -20,11 +20,14 @@ class GenerativeFactorDiscretizer(nn.Module):
         self.proj_out = nn.Linear(in_features=gen_factor_num_values, out_features=word_emb_size)
         
 
-    def forward(self, embedded_sentences: Tensor) -> (Tensor, Tensor):
+    def forward(self, embedded_sentences: Tensor, override_logits: Tensor = None):
 
         gen_factor_logits = self.proj_in(embedded_sentences)
 
-        gen_factor_logits = gumbel_softmax(logits=gen_factor_logits, dim=-1)
+        if override_logits is None:
+            gen_factor_logits = gumbel_softmax(logits=gen_factor_logits, dim=-1)
+        else:
+            gen_factor_logits = override_logits
 
         with torch.no_grad():
             gen_factor_label = torch.argmax(input=gen_factor_logits, dim=-1)
