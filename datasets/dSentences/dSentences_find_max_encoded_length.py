@@ -2,7 +2,7 @@ from rich import print
 
 import numpy as np
 
-from transformers import BertTokenizer
+from transformers import BertTokenizerFast, GPT2TokenizerFast
 
 from rich.progress import *
 from rich.console import Console
@@ -10,12 +10,22 @@ from rich.style import Style
 
 import torch
 
-CORPUS_PATH = "./data/dSentences/dSentences_sentences.npy" 
+CORPUS_PATH = "./data/dSentences/dSentences_sentences_clean.npy" 
 
-sentences = [sentence.decode() for sentence in np.load(CORPUS_PATH)]
+if "_clean.npy" in CORPUS_PATH: 
+    sentences = np.load(CORPUS_PATH)
+else:
+    sentences = [sentence.decode() for sentence in np.load(CORPUS_PATH)]
 
-tokenizer_name = "bert-base-uncased"
-tokenizer: BertTokenizer = BertTokenizer.from_pretrained(tokenizer_name)
+tokenizer_name = "gpt2"
+
+if "bert" in tokenizer_name:
+    tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(tokenizer_name)
+elif "gpt" in tokenizer_name:
+    tokenizer: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained(tokenizer_name)
+    tokenizer.pad_token = tokenizer.eos_token
+else:
+    raise ValueError(f"{tokenizer_name} is not a valid tokenizer name")
 
 console = Console()
 prg = Progress(
@@ -40,8 +50,8 @@ sentences_encoded_lengths = []
 
 for s in sentences:
 
-    sentences_encoded_lengths.append(tokenizer(s, return_tensors="pt", padding=True).input_ids.shape[1])
+    sentences_encoded_lengths.append(tokenizer(s, return_tensors="pt", padding=True, add_special_tokens=True).input_ids.shape[1])
 
     prg.advance(tsk, 1)
 
-print(torch.tensor(sentences_encoded_lengths).max())
+console.print(torch.tensor(sentences_encoded_lengths).max())
