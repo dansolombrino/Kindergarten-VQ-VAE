@@ -28,6 +28,8 @@ for idx, (s, label, one_hot) in tqdm(
         sentences_clean.append(s)
         sentences_clean_set.add(s)
 
+        # dSentences latent classes that do not have unique values: [0, 1, 3, 4]
+        # add +1 to the above values to match them to the latent classes written in the dSentences paper
         label = label[[2, 5, 6, 7, 8]]
         latent_classes_labels_clean.append(label)
 
