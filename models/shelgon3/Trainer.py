@@ -8,7 +8,7 @@ from torch.cuda import device
 
 from torch.utils.data import DataLoader
 
-from Bagon import Bagon
+from Shelgon import Shelgon
 
 from transformers import PreTrainedTokenizer
 
@@ -41,7 +41,7 @@ from wandb.wandb_run import Run
 
 from torch import save
 
-from common.tensor_utils import replace_pct_rand_values
+from math import isclose
 
 def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
@@ -64,52 +64,45 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Bagon, 
-    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
-    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
-    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
-    encoder_perturb_pct: float, decoder_perturb_pct: float,
+    model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
     opt: Optimizer, 
+    loss_recon_rescale_factor: float, loss_recon_weight: float,
+    loss_vq_rescale_factor: float, loss_vq_weight: float,
+    loss_perp_rescale_factor: float, loss_perp_weight: float,
     lr_sched: LRScheduler,
-    batch: list, 
-    vocab_size_encoder: int, vocab_size_decoder: int, 
+    batch: list, vocab_size: int,
+    stage: str, 
     console: Console
 
 ):
-    tokenized_encoder = tokenizer_encoder(
-        batch["sentence"], return_tensors="pt", 
-        padding="max_length", max_length=tokenized_encoder_sentence_max_length, 
-        add_special_tokens=tokenizer_encoder_add_special_tokens
-    )
-    input_ids_encoder: Tensor = tokenized_encoder.input_ids.to(device)
-    input_ids_encoder = replace_pct_rand_values(input_ids_encoder, encoder_perturb_pct, 0, vocab_size_encoder)
-    attention_mask_encoder: Tensor = tokenized_encoder.attention_mask.to(device)
+    sentences = batch["sentence"]
+    latent_classes_labels = batch["latent_classes_labels"]
+    # tokenized = tokenizer(sentences, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
+    # NOTE padding to max length is needed when using Gumbel-Softmax
+    tokenized = tokenizer(sentences, return_tensors="pt", padding="max_length", max_length=12, add_special_tokens=tokenizer_add_special_tokens)
+    input_ids: Tensor = tokenized.input_ids.to(device)
+    attention_mask: Tensor = tokenized.attention_mask.to(device)
 
-    tokenized_decoder = tokenizer_decoder(
-        batch["sentence"], return_tensors="pt", 
-        padding="max_length", max_length=tokenized_decoder_sentence_max_length, 
-        add_special_tokens=tokenizer_decoder_add_special_tokens
-    )
-    input_ids_decoder: Tensor = tokenized_decoder.input_ids.to(device)
-    input_ids_decoder = replace_pct_rand_values(input_ids_decoder, decoder_perturb_pct, 0, vocab_size_decoder)
-    attention_mask_decoder: Tensor = tokenized_decoder.attention_mask.to(device)
+    loss_vq_step: Tensor; metric_perp_step: Tensor; min_encoding_indices: Tensor; logits_recon: Tensor
+    loss_vq_step, metric_perp_step, min_encoding_indices, logits_recon = model.forward(input_ids, attention_mask, device, stage == "train")
 
-    logits_recon: Tensor = model.forward(
-        input_ids_encoder, attention_mask_encoder, 
-        input_ids_decoder, attention_mask_decoder
-    )
-
-    # input and targets reshaped to use KL divergence with sequential data, as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
-    loss_recon_step = kl_div(
-        input=log_softmax(logits_recon.reshape(-1, vocab_size_decoder), dim=-1), 
-        target=one_hot(input_ids_decoder, vocab_size_decoder).reshape(-1, vocab_size_decoder).float(),
+    # input and targets reshaped to use cross-entropy with sequential data, 
+    # as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
+    # loss_recon_step: Tensor = cross_entropy(
+    #     input=logits_recon.reshape(-1, vocab_size), target=input_ids.reshape(-1)
+    # )
+    loss_recon_step: Tensor = kl_div(
+        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
+        target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
         reduction="batchmean"
     )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step_per_batch, metric_acc_step_per_sentence = seq_acc(recon_ids, input_ids_decoder)
+    metric_acc_step = seq_acc(recon_ids, input_ids)
 
-    loss_full_step: Tensor = loss_recon_step
+    loss_recon_step *= loss_recon_rescale_factor * loss_recon_weight
+    loss_vq_step *= loss_vq_rescale_factor * loss_vq_weight
+    loss_full_step: Tensor = loss_recon_step + loss_vq_step
 
     # passing opt  --> training time
     # passing None --> inference time
@@ -123,17 +116,20 @@ def step(
 
     return {
         "loss_recon_step": loss_recon_step, 
+        "loss_vq_step": loss_vq_step,
+        "metric_perp_step": metric_perp_step,
         "loss_full_step": loss_full_step, 
-        "metric_acc_step_per_batch": metric_acc_step_per_batch,
-        "metric_acc_step_per_sentence": metric_acc_step_per_sentence,
+        "metric_acc_step": metric_acc_step,
         "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
-    }, input_ids_encoder, input_ids_decoder, recon_ids, batch["latent_classes_labels"]
+    }, input_ids, recon_ids
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
+    stats_stage_run["loss_vq_run"] += stats_step["loss_vq_step"] * n_els_batch
+    stats_stage_run["metric_perp_run"] += stats_step["metric_perp_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
-    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step_per_batch"] * n_els_batch * 1e2
+    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
     stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
     
     return stats_stage_run
@@ -141,12 +137,19 @@ def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batc
 def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int, n_steps: int):
 
     stats_stage_run["loss_recon_run"] /= n_els_epoch
+    stats_stage_run["loss_vq_run"] /= n_els_epoch
+    stats_stage_run["metric_perp_run"] /= n_els_epoch
     stats_stage_run["loss_full_run"] /= n_els_epoch
     stats_stage_run["metric_acc_run"] /= n_els_epoch
     stats_stage_run["padding_tokens_pct_run"] /= n_steps
 
     stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
     stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_vq_is_best"] = stats_stage_run["loss_vq_run"] < stats_stage_best["loss_vq_best"]
+    stats_stage_best["loss_vq_best"] = stats_stage_run["loss_vq_run"] if stats_stage_best["loss_vq_is_best"] else stats_stage_best["loss_vq_best"]
+    # NOTE perplexity (when used as metric) should be as close to the number of vectors in the codebook as possible!
+    stats_stage_best["metric_perp_is_best"] = stats_stage_run["metric_perp_run"] > stats_stage_best["metric_perp_best"]
+    stats_stage_best["metric_perp_best"] = stats_stage_run["metric_perp_run"] if stats_stage_best["metric_perp_is_best"] else stats_stage_best["metric_perp_best"]
     stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
     stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
     stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
@@ -163,10 +166,13 @@ def end_of_epoch_print(
 ):
     epoch_str = f"[bold {COLOR_EPOCH}]{epoch:03d}[/bold {COLOR_EPOCH}] | " if print_epoch else "    | "
     suffix_str = "\n" if print_new_line else ""
+    perp_str = f"perp: [bold {stat_color}] {stats_stage_run['metric_perp_run']:08.6f}[/bold {stat_color}] {stat_emojis[3] if stats_stage_best['metric_perp_is_best'] else '  '} | " if not isclose(stats_stage_run['metric_perp_run'], -69) else ""
 
     console.print(
         epoch_str  + \
         f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
+        f"loss_vq: [bold {stat_color}] {stats_stage_run['loss_vq_run']:08.6f}[/bold {stat_color}] {stat_emojis[0] if stats_stage_best['loss_vq_is_best'] else '  '} | " + \
+        perp_str + \
         f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
         suffix_str
     )
@@ -175,6 +181,10 @@ def init_stats_best():
     return {
         "loss_recon_best": np.Inf,
         "loss_recon_is_best": False,
+        "loss_vq_best": np.Inf,
+        "loss_vq_is_best": False,
+        "metric_perp_best": 0,
+        "metric_perp_is_best": False,
         "loss_full_best": np.Inf,
         "loss_full_is_best": False,
         "metric_acc_best": 0,
@@ -184,6 +194,8 @@ def init_stats_best():
 def init_stats_run(): 
     return {
         "loss_recon_run": 0,
+        "loss_vq_run": 0,
+        "metric_perp_run": 0,
         "loss_full_run": 0,
         "metric_acc_run": 0,
         "padding_tokens_pct_run": 0
@@ -193,125 +205,87 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
     return {
         "epoch": epoch,
         f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
+        f"{stage}/loss_vq": stats_stage_run["loss_vq_run"],
+        f"{stage}/metric_perp": stats_stage_run["metric_perp_run"],
         f"{stage}/loss_full": stats_stage_run["loss_full_run"],
         f"{stage}/acc": stats_stage_run["metric_acc_run"],
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
     } 
 
-
-def explicit_latent_classes_labels(latent_classes_labels: Tensor, console: Console):
-
-    latent_to_explicit_map = [
-        # latent factor 0 --> paper latent factor 3 --> sentence type
-        {
-            "0": "declarative",
-            "1": "interrogative"
-        }, 
-        
-        # latent factor 1 --> paper latent factor 6 --> grammatical number person
-        {
-            "0": "1st",
-            "1": "2nd",
-            "2": "3rd"
-        }, 
-        
-        # latent factor 2 --> paper latent factor 7 --> sentence negation
-        {
-            "0": "affirmative",
-            "1": "negative"
-        }, 
-        
-        # latent factor 3 --> paper latent factor 8 --> verb tense
-        {
-            "0": "past",
-            "1": "present",
-            "2": "future"
-        }, 
-        
-        # latent factor 4 --> paper latent factor 9 --> style
-        {
-            "0": "not_progressive",
-            "1": "progressive",
-        }, 
-    ]
-
-    explicit = {
-        "sentence_type": latent_to_explicit_map[0][str(latent_classes_labels[0].item())],
-        "grammatical_number_person": latent_to_explicit_map[1][str(latent_classes_labels[1].item())],
-        "sentence_negation": latent_to_explicit_map[2][str(latent_classes_labels[2].item())],
-        "verb_tense": latent_to_explicit_map[3][str(latent_classes_labels[3].item())],
-        "sentence_style": latent_to_explicit_map[4][str(latent_classes_labels[4].item())],
-    }
-
-    return explicit
-
-
 def decode_sentences(
-    input_ids_encoder: Tensor, input_ids_decoder: Tensor, recon_ids: Tensor, latent_classes_labels: Tensor,
-    stats_step: dict,
-    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
+    input_ids: Tensor, recon_ids: Tensor, 
+    tokenizer: PreTrainedTokenizer, 
     decoded_sentences: list, 
     epoch: int,
     stage: str,
     console: Console
 ):
 
-    input_ids_decoded = tokenizer_encoder.batch_decode(sequences=input_ids_encoder, skip_special_tokens=True)
-    recon_ids_decoded = tokenizer_decoder.batch_decode(sequences=recon_ids, skip_special_tokens=True)
-    sequence_accs: Tensor = stats_step["metric_acc_step_per_sentence"]
+    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids)
+    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids)
 
-    for i, r, a, l in zip(input_ids_decoded, recon_ids_decoded, sequence_accs, latent_classes_labels):
+    for i, r in zip(input_ids_decoded, recon_ids_decoded):
 
         decoded_sentences.append(
             {
                 "epoch": epoch,
                 "stage": stage,
                 "input_sentence": i,
-                "recon_sentence":  r,
-                "sentence_acc": a.cpu().item()
+                "recon_sentence":  r
             }
         )
 
-        decoded_sentences[-1].update(explicit_latent_classes_labels(l, console))
-
     return 
 
-def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
+def _save_ckpt(model: Shelgon, checkpoint_file_path: str, stage: str):
     save(
             {
                 "model_state_dict": model.state_dict(),
                 "encoder_state_dict": model.encoder.state_dict(),
-                "decoder_state_dict": model.decoder.state_dict()
+                "decoder_state_dict": model.decoder.state_dict(),
             }, 
             checkpoint_file_path
             
         )
 
-def checkpoint(stats_train_best: dict, model: Bagon, checkpoint_dir: str, stage: str):
+def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stage: str):
     
     if stats_train_best["loss_recon_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_loss_recon_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_recon_{stage}_best.pth", stage)
     
-    if stats_train_best["metric_acc_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_metric_acc_{stage}_best.pth", stage)
+    if stats_train_best["loss_vq_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_vq_{stage}_best.pth", stage)
+    
+    # if stats_train_best["metric_perp_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_perp_{stage}_best.pth", stage)
+    
+    # if stats_train_best["loss_full_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_loss_full_{stage}_best.pth", stage)
+    
+    # if stats_train_best["metric_acc_is_best"]:
+    #     _save_ckpt(model, f"{checkpoint_dir}/shelgon_ckpt_metric_acc_{stage}_best.pth", stage)
 
 
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Bagon, 
-    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
-    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int, 
-    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int, 
-    encoder_perturb_train_pct: float, encoder_perturb_val_pct: float,
-    decoder_perturb_train_pct: float, decoder_perturb_val_pct: float,
+    model: Shelgon, 
+    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
     n_epochs_to_decode_after: int, decoded_sentences: list,
-    opt: Optimizer, lr_sched: LRScheduler, 
+    opt: Optimizer, 
+    loss_recon_rescale_factor: float, loss_recon_weight: float, 
+    loss_vq_rescale_factor: float, loss_vq_weight: float, 
+    loss_perp_rescale_factor: float, loss_perp_weight: float, 
+    lr_sched: LRScheduler, 
     n_epochs: int, 
-    vocab_size_encoder: int, vocab_size_decoder: int,
-    wandb_run: Run, run_path: str
+    vocab_size: int,
+    wandb_run: Run, run_path: str,
+    export_checkpoint: bool
 ):
+    
+    if not export_checkpoint:
+        console.print(f"[bold {COLOR_WARNING}]Warning[/bold {COLOR_WARNING}] checkpoint exporting is [bold {COLOR_OFF}]OFF[/bold {COLOR_OFF}]!\n")
     
     prg.start()
     epochs_task = prg.add_task(f"[bold {COLOR_EPOCH}] Epochs", total=n_epochs)
@@ -342,29 +316,22 @@ def train(
             n_els_epoch += n_els_batch
             n_steps += 1
 
-            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
                 model=model, 
-                tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
-                tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
-                tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
-                encoder_perturb_pct=encoder_perturb_train_pct, decoder_perturb_pct=decoder_perturb_train_pct,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=opt, 
+                loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
+                loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=lr_sched,
-                batch=batch, 
-                vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
+                batch=batch, vocab_size=vocab_size,
+                stage="train",
                 console=console
             )
 
             if epoch % n_epochs_to_decode_after == 0:
-                decode_sentences(
-                    input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels, 
-                    stats_step, 
-                    tokenizer_encoder, tokenizer_decoder, 
-                    decoded_sentences, 
-                    epoch, "train", 
-                    console
-                )
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "train", console)
 
             stats_train_run = end_of_step_stats_update(stats_train_run, stats_step, n_els_batch)
             
@@ -376,7 +343,7 @@ def train(
         stats_train_run, stats_train_best = end_of_epoch_stats_update(stats_train_run, stats_train_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_train_run, stats_train_best, console, epoch, True, COLOR_TRAIN, STATS_EMOJI_TRAIN, False)
         wandb_run.log(create_wandb_log_dict(epoch, stats_train_run, "train"))
-        checkpoint(stats_train_best, model, run_path, "train")
+        # if export_checkpoint: checkpoint(stats_train_best, model, run_path, "train")
 
         ### End training part ### 
         
@@ -397,29 +364,22 @@ def train(
 
             with no_grad():
 
-                stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+                stats_step, input_ids, recon_ids = step(
                     device=device,
-                    model=model, 
-                    tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
-                    tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
-                    tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
-                    encoder_perturb_pct=encoder_perturb_val_pct, decoder_perturb_pct=decoder_perturb_val_pct,
+                    model=model,
+                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                     opt=None, 
+                    loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight,
+                    loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                    loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                     lr_sched=None,
-                    batch=batch, 
-                    vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
+                    batch=batch, vocab_size=vocab_size,
+                    stage="val",
                     console=console
                 )
 
             if epoch % n_epochs_to_decode_after == 0:
-                decode_sentences(
-                    input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels, 
-                    stats_step, 
-                    tokenizer_encoder, tokenizer_decoder, 
-                    decoded_sentences, 
-                    epoch, "val", 
-                    console
-                )
+                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "val", console)
             
             stats_val_run = end_of_step_stats_update(stats_val_run, stats_step, n_els_batch)
 
@@ -431,7 +391,7 @@ def train(
         stats_val_run, stats_val_best = end_of_epoch_stats_update(stats_val_run, stats_val_best, n_els_epoch, n_steps)
         end_of_epoch_print(stats_val_run, stats_val_best, console, epoch, False, COLOR_VAL, STATS_EMOJI_VAL, epoch != n_epochs)
         wandb_run.log(create_wandb_log_dict(epoch, stats_val_run, "val"))
-        checkpoint(stats_train_best, model, run_path, "val")
+        if export_checkpoint: checkpoint(stats_train_best, model, run_path, "val")
 
         ### End validating part ### 
 
@@ -443,13 +403,12 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, 
-    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer,
-    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
-    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
-    encoder_perturb_test_pct: float, decoder_perturb_test_pct: float,
+    model: Shelgon, tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    loss_recon_rescale_factor: float, loss_recon_weight: float,
+    loss_vq_rescale_factor: float, loss_vq_weight: float,
+    loss_perp_rescale_factor: float, loss_perp_weight: float,
     decoded_sentences: list,
-    vocab_size_encoder: int, vocab_size_decoder: int,
+    vocab_size: int,
     epoch: int,
     wandb_run: Run
 ):
@@ -474,28 +433,21 @@ def test(
 
         with no_grad():
 
-            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+            stats_step, input_ids, recon_ids = step(
                 device=device,
-                model=model, 
-                tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
-                tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
-                tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
-                encoder_perturb_pct=encoder_perturb_test_pct, decoder_perturb_pct=decoder_perturb_test_pct,
+                model=model,
+                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
                 opt=None, 
+                loss_recon_rescale_factor=loss_recon_rescale_factor, loss_recon_weight=loss_recon_weight, 
+                loss_vq_rescale_factor=loss_vq_rescale_factor, loss_vq_weight=loss_vq_weight,
+                loss_perp_rescale_factor=loss_perp_rescale_factor, loss_perp_weight=loss_perp_weight,
                 lr_sched=None,
-                batch=batch, 
-                vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
+                batch=batch, vocab_size=vocab_size,
+                stage="test",
                 console=console
             )
 
-        decode_sentences(
-            input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels,
-            stats_step, 
-            tokenizer_encoder, tokenizer_decoder, 
-            decoded_sentences, 
-            epoch, "test", 
-            console
-        )
+        decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "test", console)
         
         stats_test_run = end_of_step_stats_update(stats_test_run, stats_step, n_els_batch)
 
