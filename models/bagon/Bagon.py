@@ -9,7 +9,7 @@ from common.consts import *
 
 from common.model_utils import *
 
-SUPPORTED_MODEL_MODES = ["full", "dec-head-ft"]
+SUPPORTED_MODEL_MODES = ["full", "dec-head-ft", "enc-head-ft-dec-head-ft"]
 
 
 class Bagon(nn.Module):
@@ -28,6 +28,10 @@ class Bagon(nn.Module):
         self.encoder = enc_dec.encoder
     
         self.decoder = enc_dec.decoder
+
+        self.encoder_model_name = encoder_model_name
+
+        self.decoder_model_name = decoder_model_name
 
 
     def forward(
@@ -77,31 +81,89 @@ class Bagon(nn.Module):
         return
     
 
-    def set_mode(self, model_mode: str):
-        if model_mode == "full":
-            return
-        
-        if model_mode == "dec-head-ft":
+    def _module_make_trainable(self, module, module_requires_grad: bool):
+        for param in module.parameters():
+            param.requires_grad = module_requires_grad
+    
+    
+    def _encoder_make_trainable(self, encoder_requires_grad: bool):
+        self._module_make_trainable(self.encoder, encoder_requires_grad)
+
+    
+    def _decoder_make_trainable(self, decoder_requires_grad: bool):
+        self._module_make_trainable(self.decoder, decoder_requires_grad)
+
+    
+    def _decoder_lm_head_make_trainable(self, encoder_lm_head_requires_grad: bool):
+
+        if "bert" in self.decoder_model_name:
             # Layers composing BERT classification head, in Huggingface implementation:
             # - decoder.cls.predictions.transform.dense 
             # - decoder.cls.predictions.decoder
+            self._module_make_trainable(self.decoder.cls.predictions.transform.dense, encoder_lm_head_requires_grad)
+            self._module_make_trainable(self.decoder.cls.predictions.decoder        , encoder_lm_head_requires_grad)
 
-            # NOT possible to freeze every param except the ones in the desired layers
-            # So, we first freeze the BERT encoder and the BERT decoder
+        elif "gpt" in self.decoder_model_name:
+            self._module_make_trainable(self.decoder.lm_head, encoder_lm_head_requires_grad)
+    
+    
+    def _decoder_cross_attn_make_trainable(self, decoder_cross_attn_requires_grad: bool):
+
+        if "bert" in self.decoder_model_name:
+            for layer in self.decoder.bert.encoder.layer:
+
+                self._module_make_trainable(layer.crossattention, True)
+
+    def _set_mode_dec_head_ft(self):
+        self.model_mode = "dec-head-ft"
+
+        # NOT possible to freeze every param except the ones in the desired layers
+        # So, we first freeze the BERT encoder and the BERT decoder
+        self._encoder_make_trainable(False)
+        self._decoder_make_trainable(False)
+
+        # Vector Quantizer still trainable!
+        
+        # Then, we unfreeze the parameters of the layers we're interested in
+        self._decoder_lm_head_make_trainable(True)
+
+        self._decoder_cross_attn_make_trainable(True)
+
+    
+    def _set_mode_enc_head_dec_head_ft(self):
+        self.model_mode = "enc-dec-head-ft"
+
+        # First we set model to fine-tune just the decoder head
+        self._set_mode_dec_head_ft()
+        # Then we make the encoder last layer trainable as well
+        self._module_make_trainable(self.encoder.encoder.layer[-1], True)
+        self._module_make_trainable(self.encoder.pooler, True)
+
+    
+    def set_mode(self, model_mode: str):
+
+        if model_mode == "full":
+            self.model_mode = "full"
+            return
+        
+        if model_mode == "dec-head-ft":
+            self._set_mode_dec_head_ft()
+
+            return
+
+        if model_mode == "enc-head-ft-dec-head-ft":
+            self._set_mode_enc_head_dec_head_ft()
+
+            return
+        
+        if model_mode == "vq-ft":
+            self.model_mode = "vq-ft"
+            # we want to just fine-tune the vector quantization NN --> gotta freeze encoder and decoder
             for param in self.encoder.parameters():
                 param.requires_grad = False
             
             for param in self.decoder.parameters():
                 param.requires_grad = False
-
-            # (Vector Quantizer parameters are kept trainable!)
-            
-            # Then, we unfreeze the parameters of the layers we're interested in
-            for p in self.decoder.cls.predictions.transform.dense.parameters():
-                p.requires_grad = True
-
-            for p in self.decoder.cls.predictions.decoder.parameters():
-                p.requires_grad = True
 
             return
         

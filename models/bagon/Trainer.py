@@ -65,34 +65,49 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 def step(
     device: device,
     model: Bagon, 
-    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
+    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
+    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_pct: float, decoder_perturb_pct: float,
     opt: Optimizer, 
     lr_sched: LRScheduler,
-    batch: list, vocab_size: int,
+    batch: list, 
+    vocab_size_encoder: int, vocab_size_decoder: int, 
     console: Console
 
 ):
-    tokenized = tokenizer(batch, return_tensors="pt", padding=True, add_special_tokens=tokenizer_add_special_tokens)
-    input_ids: Tensor = tokenized.input_ids.to(device)
-    attention_mask: Tensor = tokenized.attention_mask.to(device)
+    tokenized_encoder = tokenizer_encoder(
+        batch["sentence"], return_tensors="pt", 
+        padding="max_length", max_length=tokenized_encoder_sentence_max_length, 
+        add_special_tokens=tokenizer_encoder_add_special_tokens
+    )
+    input_ids_encoder: Tensor = tokenized_encoder.input_ids.to(device)
+    input_ids_encoder = replace_pct_rand_values(input_ids_encoder, encoder_perturb_pct, 0, vocab_size_encoder)
+    attention_mask_encoder: Tensor = tokenized_encoder.attention_mask.to(device)
 
-    encoder_input_ids: Tensor = replace_pct_rand_values(input_ids, encoder_perturb_pct, 0, vocab_size)
-    decoder_input_ids: Tensor = replace_pct_rand_values(input_ids, decoder_perturb_pct, 0, vocab_size)
+    tokenized_decoder = tokenizer_decoder(
+        batch["sentence"], return_tensors="pt", 
+        padding="max_length", max_length=tokenized_decoder_sentence_max_length, 
+        add_special_tokens=tokenizer_decoder_add_special_tokens
+    )
+    input_ids_decoder: Tensor = tokenized_decoder.input_ids.to(device)
+    input_ids_decoder = replace_pct_rand_values(input_ids_decoder, decoder_perturb_pct, 0, vocab_size_decoder)
+    attention_mask_decoder: Tensor = tokenized_decoder.attention_mask.to(device)
 
     logits_recon: Tensor = model.forward(
-        encoder_input_ids, attention_mask, decoder_input_ids, attention_mask
+        input_ids_encoder, attention_mask_encoder, 
+        input_ids_decoder, attention_mask_decoder
     )
 
     # input and targets reshaped to use KL divergence with sequential data, as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
     loss_recon_step = kl_div(
-        input=log_softmax(logits_recon.reshape(-1, vocab_size), dim=-1), 
-        target=one_hot(input_ids, vocab_size).reshape(-1, vocab_size).float(),
+        input=log_softmax(logits_recon.reshape(-1, vocab_size_decoder), dim=-1), 
+        target=one_hot(input_ids_decoder, vocab_size_decoder).reshape(-1, vocab_size_decoder).float(),
         reduction="batchmean"
     )
     
     recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step, metric_acc_per_sentence = seq_acc(recon_ids, input_ids)
+    metric_acc_step_per_batch, metric_acc_step_per_sentence = seq_acc(recon_ids, input_ids_decoder)
 
     loss_full_step: Tensor = loss_recon_step
 
@@ -109,15 +124,16 @@ def step(
     return {
         "loss_recon_step": loss_recon_step, 
         "loss_full_step": loss_full_step, 
-        "metric_acc_step": metric_acc_step,
+        "metric_acc_step_per_batch": metric_acc_step_per_batch,
+        "metric_acc_step_per_sentence": metric_acc_step_per_sentence,
         "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
-    }, input_ids, recon_ids
+    }, input_ids_encoder, input_ids_decoder, recon_ids, batch["latent_classes_labels"]
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
-    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step"] * n_els_batch * 1e2
+    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step_per_batch"] * n_els_batch * 1e2
     stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
     
     return stats_stage_run
@@ -182,28 +198,81 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
     } 
 
+
+def explicit_latent_classes_labels(latent_classes_labels: Tensor, console: Console):
+
+    latent_to_explicit_map = [
+        # latent factor 0 --> paper latent factor 3 --> sentence type
+        {
+            "0": "declarative",
+            "1": "interrogative"
+        }, 
+        
+        # latent factor 1 --> paper latent factor 6 --> grammatical number person
+        {
+            "0": "1st",
+            "1": "2nd",
+            "2": "3rd"
+        }, 
+        
+        # latent factor 2 --> paper latent factor 7 --> sentence negation
+        {
+            "0": "affirmative",
+            "1": "negative"
+        }, 
+        
+        # latent factor 3 --> paper latent factor 8 --> verb tense
+        {
+            "0": "past",
+            "1": "present",
+            "2": "future"
+        }, 
+        
+        # latent factor 4 --> paper latent factor 9 --> style
+        {
+            "0": "not_progressive",
+            "1": "progressive",
+        }, 
+    ]
+
+    explicit = {
+        "sentence_type": latent_to_explicit_map[0][str(latent_classes_labels[0].item())],
+        "grammatical_number_person": latent_to_explicit_map[1][str(latent_classes_labels[1].item())],
+        "sentence_negation": latent_to_explicit_map[2][str(latent_classes_labels[2].item())],
+        "verb_tense": latent_to_explicit_map[3][str(latent_classes_labels[3].item())],
+        "sentence_style": latent_to_explicit_map[4][str(latent_classes_labels[4].item())],
+    }
+
+    return explicit
+
+
 def decode_sentences(
-    input_ids: Tensor, recon_ids: Tensor, 
-    tokenizer: PreTrainedTokenizer, 
+    input_ids_encoder: Tensor, input_ids_decoder: Tensor, recon_ids: Tensor, latent_classes_labels: Tensor,
+    stats_step: dict,
+    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
     decoded_sentences: list, 
     epoch: int,
     stage: str,
     console: Console
 ):
 
-    input_ids_decoded = tokenizer.batch_decode(sequences=input_ids)
-    recon_ids_decoded = tokenizer.batch_decode(sequences=recon_ids)
+    input_ids_decoded = tokenizer_encoder.batch_decode(sequences=input_ids_encoder, skip_special_tokens=True)
+    recon_ids_decoded = tokenizer_decoder.batch_decode(sequences=recon_ids, skip_special_tokens=True)
+    sequence_accs: Tensor = stats_step["metric_acc_step_per_sentence"]
 
-    for i, r in zip(input_ids_decoded, recon_ids_decoded):
+    for i, r, a, l in zip(input_ids_decoded, recon_ids_decoded, sequence_accs, latent_classes_labels):
 
         decoded_sentences.append(
             {
                 "epoch": epoch,
                 "stage": stage,
                 "input_sentence": i,
-                "recon_sentence":  r
+                "recon_sentence":  r,
+                "sentence_acc": a.cpu().item()
             }
         )
+
+        decoded_sentences[-1].update(explicit_latent_classes_labels(l, console))
 
     return 
 
@@ -232,13 +301,15 @@ def train(
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
     model: Bagon, 
-    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool, 
-    encoder_perturb_train_pct: float, encoder_perturb_val_pct: float, encoder_perturb_test_pct: float,
-    decoder_perturb_train_pct: float, decoder_perturb_val_pct: float, decoder_perturb_test_pct: float,
+    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
+    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int, 
+    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int, 
+    encoder_perturb_train_pct: float, encoder_perturb_val_pct: float,
+    decoder_perturb_train_pct: float, decoder_perturb_val_pct: float,
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
-    vocab_size: int,
+    vocab_size_encoder: int, vocab_size_decoder: int,
     wandb_run: Run, run_path: str
 ):
     
@@ -271,19 +342,29 @@ def train(
             n_els_epoch += n_els_batch
             n_steps += 1
 
-            stats_step, input_ids, recon_ids = step(
+            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
                 device=device,
                 model=model, 
-                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
+                tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
+                tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_train_pct, decoder_perturb_pct=decoder_perturb_train_pct,
                 opt=opt, 
                 lr_sched=lr_sched,
-                batch=batch, vocab_size=vocab_size,
+                batch=batch, 
+                vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
                 console=console
             )
 
             if epoch % n_epochs_to_decode_after == 0:
-                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "train", console)
+                decode_sentences(
+                    input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels, 
+                    stats_step, 
+                    tokenizer_encoder, tokenizer_decoder, 
+                    decoded_sentences, 
+                    epoch, "train", 
+                    console
+                )
 
             stats_train_run = end_of_step_stats_update(stats_train_run, stats_step, n_els_batch)
             
@@ -316,19 +397,29 @@ def train(
 
             with no_grad():
 
-                stats_step, input_ids, recon_ids = step(
+                stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
                     device=device,
-                    model=model,
-                    tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                    model=model, 
+                    tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
+                    tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
+                    tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                     encoder_perturb_pct=encoder_perturb_val_pct, decoder_perturb_pct=decoder_perturb_val_pct,
                     opt=None, 
                     lr_sched=None,
-                    batch=batch, vocab_size=vocab_size,
+                    batch=batch, 
+                    vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
                     console=console
                 )
 
             if epoch % n_epochs_to_decode_after == 0:
-                decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "val", console)
+                decode_sentences(
+                    input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels, 
+                    stats_step, 
+                    tokenizer_encoder, tokenizer_decoder, 
+                    decoded_sentences, 
+                    epoch, "val", 
+                    console
+                )
             
             stats_val_run = end_of_step_stats_update(stats_val_run, stats_step, n_els_batch)
 
@@ -353,10 +444,12 @@ def test(
     device: device, 
     dl_test: DataLoader, n_batches_test,
     model: Bagon, 
-    tokenizer: PreTrainedTokenizer, tokenizer_add_special_tokens: bool,
+    tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer,
+    tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
+    tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_test_pct: float, decoder_perturb_test_pct: float,
     decoded_sentences: list,
-    vocab_size: int,
+    vocab_size_encoder: int, vocab_size_decoder: int,
     epoch: int,
     wandb_run: Run
 ):
@@ -381,18 +474,28 @@ def test(
 
         with no_grad():
 
-            stats_step, input_ids, recon_ids = step(
+            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
                 device=device,
-                model=model,
-                tokenizer=tokenizer, tokenizer_add_special_tokens=tokenizer_add_special_tokens,
+                model=model, 
+                tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
+                tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
+                tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_test_pct, decoder_perturb_pct=decoder_perturb_test_pct,
                 opt=None, 
                 lr_sched=None,
-                batch=batch, vocab_size=vocab_size,
+                batch=batch, 
+                vocab_size_encoder=vocab_size_encoder, vocab_size_decoder=vocab_size_decoder,
                 console=console
             )
 
-        decode_sentences(input_ids, recon_ids, tokenizer, decoded_sentences, epoch, "test", console)
+        decode_sentences(
+            input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels,
+            stats_step, 
+            tokenizer_encoder, tokenizer_decoder, 
+            decoded_sentences, 
+            epoch, "test", 
+            console
+        )
         
         stats_test_run = end_of_step_stats_update(stats_test_run, stats_step, n_els_batch)
 

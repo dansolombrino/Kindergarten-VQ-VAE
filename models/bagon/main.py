@@ -8,15 +8,14 @@ from torch.utils.data import random_split, DataLoader
 
 from Bagon import Bagon
 
-from transformers import BertTokenizerFast
+from transformers import BertTokenizerFast, PreTrainedTokenizer, GPT2TokenizerFast
 
 from torch.optim.adam import Adam
 
 from torch.optim.lr_scheduler import MultiStepLR
 
-from rich.progress import *
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn,TimeElapsedColumn, TimeRemainingColumn
 from rich.style import Style
-
 from rich.console import Console
 
 import wandb
@@ -31,12 +30,15 @@ import os
 
 import pandas as pd
 
+import json
+
+from rich import print
 
 def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ds = dSentencesDataset(DATASET_PATH)
+    ds = dSentencesDataset(DATASET_PATH, LATENT_CLASSES_LABELS_PATH, LATENT_CLASSES_ONE_HOT_PATH)
     
     ds_train_len = int(len(ds) * TRAIN_SPLIT_PCT)
     ds_val_len = int(len(ds) * VAL_SPLIT_PCT)
@@ -59,9 +61,16 @@ def main():
     model.set_mode(MODEL_MODE)
     model.model_params_summary_print()
 
-    tokenizer_name = TOKENIZER_NAME
-    tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(tokenizer_name)
-    VOCAB_SIZE = 30522
+    tokenizer_encoder: BertTokenizerFast = BertTokenizerFast.from_pretrained(TOKENIZER_NAME_ENCODER)
+    
+    if "bert" in TOKENIZER_NAME_DECODER:
+        tokenizer_decoder: BertTokenizerFast = BertTokenizerFast.from_pretrained(TOKENIZER_NAME_DECODER)
+    elif "gpt" in TOKENIZER_NAME_DECODER:
+        tokenizer_decoder: GPT2TokenizerFast = GPT2TokenizerFast.from_pretrained(TOKENIZER_NAME_DECODER)
+        tokenizer_decoder.pad_token = tokenizer_decoder.eos_token
+    else:
+        raise ValueError(f"{TOKENIZER_NAME_DECODER} is not a valid decoder tokenizer name.")
+    
 
     opt = Adam(params=model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, amsgrad=AMSGRAD)
     if LR_SCHEDULER == "MultiStepLR":
@@ -97,6 +106,8 @@ def main():
             "run_id": run_id
         }
     )
+    with open(f"{run_path}/run_conf.json", 'w') as fp:
+        json.dump(run_conf, fp)
     os.environ["WANDB_SILENT"] = WANDB_SILENT
     wandb_run = wandb.init(
         project=WANDB_PROJECT_NAME, group=WANDB_GROUP, job_type=WANDB_JOB_TYPE,
@@ -115,13 +126,15 @@ def main():
         device=device, 
         dl_train=dl_train, dl_val=dl_val, n_batches_train=n_batches_train, n_batches_val=n_batches_val,
         model=model, 
-        tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, 
-        encoder_perturb_train_pct=ENCODER_PERTURB_TRAIN_PCT, encoder_perturb_val_pct=ENCODER_PERTURB_VAL_PCT, encoder_perturb_test_pct=ENCODER_PERTURB_TRAIN_PCT,
-        decoder_perturb_train_pct=DECODER_PERTURB_TRAIN_PCT, decoder_perturb_val_pct=DECODER_PERTURB_VAL_PCT, decoder_perturb_test_pct=DECODER_PERTURB_TRAIN_PCT,
+        tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder, 
+        tokenizer_encoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_encoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
+        tokenizer_decoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_decoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
+        encoder_perturb_train_pct=ENCODER_PERTURB_TRAIN_PCT, encoder_perturb_val_pct=ENCODER_PERTURB_VAL_PCT,
+        decoder_perturb_train_pct=DECODER_PERTURB_TRAIN_PCT, decoder_perturb_val_pct=DECODER_PERTURB_VAL_PCT,
         n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER, decoded_sentences=decoded_sentences,
         opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
-        vocab_size=VOCAB_SIZE,
+        vocab_size_encoder=VOCAB_SIZE_ENCODER, vocab_size_decoder=VOCAB_SIZE_DECODER,
         wandb_run=wandb_run, run_path=run_path
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
@@ -132,10 +145,12 @@ def main():
         device=device,
         dl_test=dl_test, n_batches_test=n_batches_test,
         model=model, 
-        tokenizer=tokenizer, tokenizer_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS,
+        tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder, 
+        tokenizer_encoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_encoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
+        tokenizer_decoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_decoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
         encoder_perturb_test_pct=ENCODER_PERTURB_TEST_PCT, decoder_perturb_test_pct=DECODER_PERTURB_TEST_PCT,
         decoded_sentences=decoded_sentences,
-        vocab_size=VOCAB_SIZE,
+        vocab_size_encoder=VOCAB_SIZE_ENCODER, vocab_size_decoder=VOCAB_SIZE_DECODER,
         # TODO NOTE handle this in case of resuming from checkpoint!
         epoch=N_EPOCHS,
         wandb_run=wandb_run

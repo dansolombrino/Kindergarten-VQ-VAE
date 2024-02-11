@@ -17,13 +17,14 @@ class dSentencesDataset(Dataset):
         latent_classes_labels_path: str = None,
         latent_classes_one_hot_path: str = None,
     ):
-        self.sentences = [sentence.decode() for sentence in np.load(sentences_path)]
+        # self.sentences = [sentence.decode() for sentence in np.load(sentences_path)]
+        self.sentences = np.load(sentences_path).tolist()
 
         self.latent_classes_labels = None
         self.latent_classes_one_hot = None
         
         if latent_classes_labels_path is not None and latent_classes_one_hot_path is not None:
-        
+            
             self.latent_classes_labels: Tensor = as_tensor(np.load(latent_classes_labels_path)).long()
             self.latent_classes_one_hot: Tensor = as_tensor(np.load(latent_classes_one_hot_path))
 
@@ -50,12 +51,15 @@ class dSentencesDataset(Dataset):
     def __getitem__(self, idx) -> Union[str, dict]:
 
         if self.latent_classes_labels is None:
-            return self.sentences[idx]
+            return {
+                "sentence": self.sentences[idx],
+            }
         else:
 
             return {
                 "sentence": self.sentences[idx],
-                "latent_classes_labels": self.latent_classes_labels[idx][1:], # excluding obj-verb relation latent generative factor
+                # "latent_classes_labels": self.latent_classes_labels[idx][1:], # excluding obj-verb relation latent generative factor
+                "latent_classes_labels": self.latent_classes_labels[idx],
                 "latent_classes_one_hot": self.latent_classes_one_hot[idx]
             }
     
@@ -65,9 +69,12 @@ if __name__ == "__main__":
 
     from rich import print
 
+    CLEAN = "_clean"
+
     dataset = dSentencesDataset(
-        "./data/dSentences/dSentences_sentences.npy",
-        "./data/dSentences/dSentences_latent_classes_labels.npy"
+        f"./data/dSentences/dSentences_sentences{CLEAN}.npy",
+        f"./data/dSentences/dSentences_latent_classes_labels{CLEAN}.npy",
+        f"./data/dSentences/dSentences_latent_classes_one_hot{CLEAN}.npy"
     )
 
     print(dataset[0])
