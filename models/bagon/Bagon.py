@@ -112,7 +112,7 @@ class Bagon(nn.Module):
         if "bert" in self.decoder_model_name:
             for layer in self.decoder.bert.encoder.layer:
 
-                self._module_make_trainable(layer.crossattention, True)
+                self._module_make_trainable(layer.crossattention, decoder_cross_attn_requires_grad)
 
     def _set_mode_dec_head_ft(self):
         self.model_mode = "dec-head-ft"
