@@ -87,10 +87,12 @@ SENTENCES_TOT = min(len(all_neg_df), len(all_aff_df))
 print(f"SENTENCES_TOT: {SENTENCES_TOT}")
 
 SENTENCES_TRAIN = int(SENTENCES_TOT / 2)
-SENTENCES_TEST  = SENTENCES_TOT - SENTENCES_TRAIN
 
-s_neg_train = all_neg_df.head(SENTENCES_TRAIN)
-s_aff_train = all_aff_df.head(SENTENCES_TRAIN)
+OVERRIDE_TRAIN = 33
+# OVERRIDE_TRAIN = SENTENCES_TRAIN
+
+s_neg_train = all_neg_df.head(OVERRIDE_TRAIN)
+s_aff_train = all_aff_df.head(OVERRIDE_TRAIN)
 
 s_neg_train = s_neg_train["input_sentence"].tolist()
 s_aff_train = s_aff_train["input_sentence"].tolist()
@@ -139,7 +141,12 @@ enc_out_diff_train = enc_out_neg_train - enc_out_aff_train
 
 ### --- Encode test samples AND compute latent addition --- ###
 
-s_neg_test = all_neg_df.tail(SENTENCES_TEST)
+SENTENCES_TEST  = SENTENCES_TOT - SENTENCES_TRAIN
+
+OVERRIDE_TEST = 33
+# OVERRIDE_TEST = SENTENCES_TEST
+
+s_neg_test = all_neg_df.tail(OVERRIDE_TEST)
 
 s_neg_test = s_neg_test["input_sentence"].tolist()
 
@@ -196,10 +203,8 @@ recon_ids = argmax(softmax(recon_logits_airth, dim=-1), dim=-1)
 recon_sentences = tokenizer_decoder.batch_decode(recon_ids, skip_special_tokens=True)
 
 for original, modified in zip(s_neg_test, recon_sentences):
-
-    if original != modified:
-        print(f"{original}\n{modified}")
-        print("\n ~~~ \n")
+    print(f"{original}\n{modified}")
+    print("\n ~~~ \n")
 
 # recon_sentences = tokenizer_decoder.batch_decode(recon_ids)
 
