@@ -6,7 +6,7 @@ from datasets.dSentences.dSentencesDataset import dSentencesDataset
 
 from torch.utils.data import random_split, DataLoader
 
-from Bagon import Bagon
+from Shelgon import Shelgon
 
 from transformers import BertTokenizerFast, PreTrainedTokenizer, GPT2TokenizerFast
 
@@ -53,8 +53,10 @@ def main():
 
     from transformers.utils import logging
     logging.set_verbosity(40)
-    model = Bagon(
+    model = Shelgon(
         encoder_model_name=ENCODER_MODEL_NAME, 
+        emb_size=EMB_SIZE, seq_len=TOKENIZED_SENTENCE_MAX_LENGTH,
+        num_latent_classes=NUM_LATENT_CLASSES, num_labels_per_class=NUM_LABELS_PER_CLASS,
         decoder_model_name=DECODER_MODEL_NAME
     ).to(device)
     model.compile()
@@ -131,6 +133,7 @@ def main():
         tokenizer_decoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_decoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
         encoder_perturb_train_pct=ENCODER_PERTURB_TRAIN_PCT, encoder_perturb_val_pct=ENCODER_PERTURB_VAL_PCT,
         decoder_perturb_train_pct=DECODER_PERTURB_TRAIN_PCT, decoder_perturb_val_pct=DECODER_PERTURB_VAL_PCT,
+        num_labels_per_class=NUM_LABELS_PER_CLASS,
         n_epochs_to_decode_after=N_EPOCHS_TO_DECODE_AFTER, decoded_sentences=decoded_sentences,
         opt=opt, lr_sched=lr_sched,
         n_epochs=N_EPOCHS, 
@@ -138,7 +141,7 @@ def main():
         wandb_run=wandb_run, run_path=run_path
     )
     n_batches_test = int(len(dl_test) * LIM_BATCHES_TEST_PCT)
-    model_best_val_checkpoint = torch.load(f"{run_path}/bagon_ckpt_loss_recon_val_best.pth")
+    model_best_val_checkpoint = torch.load(f"{run_path}/{MODEL_NAME}_ckpt_loss_recon_val_best.pth")
     model.load_state_dict(model_best_val_checkpoint["model_state_dict"])
     test(
         prg=prg, console=console,
@@ -149,6 +152,7 @@ def main():
         tokenizer_encoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_encoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
         tokenizer_decoder_add_special_tokens=TOKENIZER_ADD_SPECIAL_TOKENS, tokenized_decoder_sentence_max_length=TOKENIZED_SENTENCE_MAX_LENGTH,
         encoder_perturb_test_pct=ENCODER_PERTURB_TEST_PCT, decoder_perturb_test_pct=DECODER_PERTURB_TEST_PCT,
+        num_labels_per_class=NUM_LABELS_PER_CLASS,
         decoded_sentences=decoded_sentences,
         vocab_size_encoder=VOCAB_SIZE_ENCODER, vocab_size_decoder=VOCAB_SIZE_DECODER,
         # TODO NOTE handle this in case of resuming from checkpoint!

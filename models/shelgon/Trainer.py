@@ -8,7 +8,7 @@ from torch.cuda import device
 
 from torch.utils.data import DataLoader
 
-from Bagon import Bagon
+from Shelgon import Shelgon
 
 from transformers import PreTrainedTokenizer
 
@@ -64,11 +64,12 @@ def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
 def step(
     device: device,
-    model: Bagon, 
+    model: Shelgon, 
     tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
     tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_pct: float, decoder_perturb_pct: float,
+    num_labels_per_class: int,
     opt: Optimizer, 
     lr_sched: LRScheduler,
     batch: list, 
@@ -76,8 +77,13 @@ def step(
     console: Console
 
 ):
+
+    sentences: Tensor = batch["sentence"]
+    gt_one_hot: Tensor = batch["latent_classes_one_hot"].to(device)
+    gt_labels: Tensor = batch["latent_classes_labels"].to(device)
+
     tokenized_encoder = tokenizer_encoder(
-        batch["sentence"], return_tensors="pt", 
+        sentences, return_tensors="pt", 
         padding="max_length", max_length=tokenized_encoder_sentence_max_length, 
         add_special_tokens=tokenizer_encoder_add_special_tokens
     )
@@ -86,15 +92,16 @@ def step(
     attention_mask_encoder: Tensor = tokenized_encoder.attention_mask.to(device)
 
     tokenized_decoder = tokenizer_decoder(
-        batch["sentence"], return_tensors="pt", 
+        sentences, return_tensors="pt", 
         padding="max_length", max_length=tokenized_decoder_sentence_max_length, 
         add_special_tokens=tokenizer_decoder_add_special_tokens
     )
     input_ids_decoder: Tensor = tokenized_decoder.input_ids.to(device)
     input_ids_decoder = replace_pct_rand_values(input_ids_decoder, decoder_perturb_pct, 0, vocab_size_decoder)
     attention_mask_decoder: Tensor = tokenized_decoder.attention_mask.to(device)
-
-    logits_recon: Tensor = model.forward(
+    
+    logits_recon: Tensor; logits_pred: Tensor
+    logits_recon, logits_pred = model.forward(
         input_ids_encoder, attention_mask_encoder, 
         input_ids_decoder, attention_mask_decoder
     )
@@ -106,10 +113,20 @@ def step(
         reduction="batchmean"
     )
     
-    recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
-    metric_acc_step_per_batch, metric_acc_step_per_sentence = seq_acc(recon_ids, input_ids_decoder)
+    loss_pred_step = kl_div(
+        input=log_softmax(logits_pred, dim=-1).reshape(-1, num_labels_per_class),
+        target=gt_one_hot.reshape(-1, num_labels_per_class).float().to(device),
+        reduction="batchmean"
+    )
 
-    loss_full_step: Tensor = loss_recon_step
+    loss_full_step: Tensor = loss_recon_step + loss_pred_step
+    
+    recon_ids = argmax(softmax(logits_recon, dim=-1), dim=-1)
+    acc_recon_step_per_batch, acc_recon_step_per_sentence = seq_acc(recon_ids, input_ids_decoder)
+
+    acc_pred_step_per_batch, acc_pred_step_per_sentence = seq_acc(
+        argmax(softmax(logits_pred, dim=-1), dim=-1), gt_labels
+    )
 
     # passing opt  --> training time
     # passing None --> inference time
@@ -123,17 +140,22 @@ def step(
 
     return {
         "loss_recon_step": loss_recon_step, 
+        "loss_pred_step": loss_pred_step, 
         "loss_full_step": loss_full_step, 
-        "metric_acc_step_per_batch": metric_acc_step_per_batch,
-        "metric_acc_step_per_sentence": metric_acc_step_per_sentence,
+        "acc_recon_step_per_batch": acc_recon_step_per_batch,
+        "acc_recon_step_per_sentence": acc_recon_step_per_sentence,
+        "acc_pred_step_per_batch": acc_pred_step_per_batch,
+        "acc_pred_step_per_sentence": acc_pred_step_per_sentence,
         "padding_tokens_pct_step": -69 #count_pct_padding_tokens(input_ids, console)
-    }, input_ids_encoder, input_ids_decoder, recon_ids, batch["latent_classes_labels"]
+    }, input_ids_encoder, input_ids_decoder, recon_ids, logits_pred, batch["latent_classes_labels"]
 
 def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batch: int):
     
     stats_stage_run["loss_recon_run"] += stats_step["loss_recon_step"] * n_els_batch
+    stats_stage_run["loss_pred_run"] += stats_step["loss_pred_step"] * n_els_batch
     stats_stage_run["loss_full_run"] += stats_step["loss_full_step"] * n_els_batch
-    stats_stage_run["metric_acc_run"] += stats_step["metric_acc_step_per_batch"] * n_els_batch * 1e2
+    stats_stage_run["acc_recon_run"] += stats_step["acc_recon_step_per_batch"] * n_els_batch * 1e2
+    stats_stage_run["acc_pred_run"] += stats_step["acc_pred_step_per_batch"] * n_els_batch * 1e2
     stats_stage_run["padding_tokens_pct_run"] += stats_step["padding_tokens_pct_step"]
     
     return stats_stage_run
@@ -141,16 +163,22 @@ def end_of_step_stats_update(stats_stage_run: dict, stats_step: dict, n_els_batc
 def end_of_epoch_stats_update(stats_stage_run: dict, stats_stage_best: dict, n_els_epoch: int, n_steps: int):
 
     stats_stage_run["loss_recon_run"] /= n_els_epoch
+    stats_stage_run["loss_pred_run"] /= n_els_epoch
     stats_stage_run["loss_full_run"] /= n_els_epoch
-    stats_stage_run["metric_acc_run"] /= n_els_epoch
+    stats_stage_run["acc_recon_run"] /= n_els_epoch
+    stats_stage_run["acc_pred_run"] /= n_els_epoch
     stats_stage_run["padding_tokens_pct_run"] /= n_steps
 
     stats_stage_best["loss_recon_is_best"] = stats_stage_run["loss_recon_run"] < stats_stage_best["loss_recon_best"]
     stats_stage_best["loss_recon_best"] = stats_stage_run["loss_recon_run"] if stats_stage_best["loss_recon_is_best"] else stats_stage_best["loss_recon_best"]
+    stats_stage_best["loss_pred_is_best"] = stats_stage_run["loss_pred_run"] < stats_stage_best["loss_pred_best"]
+    stats_stage_best["loss_pred_best"] = stats_stage_run["loss_pred_run"] if stats_stage_best["loss_pred_is_best"] else stats_stage_best["loss_pred_best"]
     stats_stage_best["loss_full_is_best"] = stats_stage_run["loss_full_run"] < stats_stage_best["loss_full_best"]
     stats_stage_best["loss_full_best"] = stats_stage_run["loss_full_run"] if stats_stage_best["loss_full_is_best"] else stats_stage_best["loss_full_best"]
-    stats_stage_best["metric_acc_is_best"] = stats_stage_run["metric_acc_run"] > stats_stage_best["metric_acc_best"]
-    stats_stage_best["metric_acc_best"] = stats_stage_run["metric_acc_run"] if stats_stage_best["metric_acc_is_best"] else stats_stage_best["metric_acc_best"]
+    stats_stage_best["acc_recon_is_best"] = stats_stage_run["acc_recon_run"] > stats_stage_best["acc_recon_best"]
+    stats_stage_best["acc_recon_best"] = stats_stage_run["acc_recon_run"] if stats_stage_best["acc_recon_is_best"] else stats_stage_best["acc_recon_best"]
+    stats_stage_best["acc_pred_is_best"] = stats_stage_run["acc_pred_run"] > stats_stage_best["acc_pred_best"]
+    stats_stage_best["acc_pred_best"] = stats_stage_run["acc_pred_run"] if stats_stage_best["acc_pred_is_best"] else stats_stage_best["acc_pred_best"]
 
     return stats_stage_run, stats_stage_best
 
@@ -166,8 +194,10 @@ def end_of_epoch_print(
 
     console.print(
         epoch_str  + \
-        f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:08.6f}[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
-        f"acc: [bold {stat_color}]{stats_stage_run['metric_acc_run']:08.6f}%[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['metric_acc_is_best'] else '  '} | " + \
+        f"loss_recon: [bold {stat_color}] {stats_stage_run['loss_recon_run']:09.6f}[/bold {stat_color}] {stat_emojis[0] if stats_stage_best['loss_recon_is_best'] else '  '} | " + \
+        f"acc_recon: [bold {stat_color}]{stats_stage_run['acc_recon_run']:09.6f}%[/bold {stat_color}] {stat_emojis[1] if stats_stage_best['acc_recon_is_best'] else '  '} | " + \
+        f"loss_pred: [bold {stat_color}] {stats_stage_run['loss_pred_run']:09.6f}[/bold {stat_color}] {stat_emojis[2] if stats_stage_best['loss_pred_is_best'] else '  '} | " + \
+        f"acc_pred: [bold {stat_color}]{stats_stage_run['acc_pred_run']:09.6f}%[/bold {stat_color}] {stat_emojis[3] if stats_stage_best['acc_pred_is_best'] else '  '} | " + \
         suffix_str
     )
 
@@ -175,17 +205,23 @@ def init_stats_best():
     return {
         "loss_recon_best": np.Inf,
         "loss_recon_is_best": False,
+        "loss_pred_best": np.Inf,
+        "loss_pred_is_best": False,
         "loss_full_best": np.Inf,
         "loss_full_is_best": False,
-        "metric_acc_best": 0,
-        "metric_acc_is_best": False
+        "acc_recon_best": 0,
+        "acc_recon_is_best": False,
+        "acc_pred_best": 0,
+        "acc_pred_is_best": False
     }
 
 def init_stats_run(): 
     return {
         "loss_recon_run": 0,
+        "loss_pred_run": 0,
         "loss_full_run": 0,
-        "metric_acc_run": 0,
+        "acc_recon_run": 0,
+        "acc_pred_run": 0,
         "padding_tokens_pct_run": 0
     }
 
@@ -193,8 +229,10 @@ def create_wandb_log_dict(epoch: int, stats_stage_run: dict, stage: str):
     return {
         "epoch": epoch,
         f"{stage}/loss_recon": stats_stage_run["loss_recon_run"],
+        f"{stage}/loss_pred": stats_stage_run["loss_pred_run"],
         f"{stage}/loss_full": stats_stage_run["loss_full_run"],
-        f"{stage}/acc": stats_stage_run["metric_acc_run"],
+        f"{stage}/acc_recon": stats_stage_run["acc_recon_run"],
+        f"{stage}/acc_pred": stats_stage_run["acc_pred_run"],
         f"padding_tokens_pct/{stage}": stats_stage_run["padding_tokens_pct_run"]
     } 
 
@@ -258,9 +296,10 @@ def decode_sentences(
 
     input_ids_decoded = tokenizer_encoder.batch_decode(sequences=input_ids_encoder, skip_special_tokens=True)
     recon_ids_decoded = tokenizer_decoder.batch_decode(sequences=recon_ids, skip_special_tokens=True)
-    sequence_accs: Tensor = stats_step["metric_acc_step_per_sentence"]
+    recon_accs: Tensor = stats_step["acc_recon_step_per_sentence"]
+    pred_accs: Tensor = stats_step["acc_pred_step_per_sentence"]
 
-    for i, r, a, l in zip(input_ids_decoded, recon_ids_decoded, sequence_accs, latent_classes_labels):
+    for i, r, a_r, a_p, l in zip(input_ids_decoded, recon_ids_decoded, recon_accs, pred_accs, latent_classes_labels):
 
         decoded_sentences.append(
             {
@@ -268,7 +307,8 @@ def decode_sentences(
                 "stage": stage,
                 "input_sentence": i,
                 "recon_sentence":  r,
-                "sentence_acc": a.cpu().item()
+                "recon_acc": a_r.cpu().item(),
+                "pred_acc": a_p.cpu().item()
             }
         )
 
@@ -276,7 +316,7 @@ def decode_sentences(
 
     return 
 
-def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
+def _save_ckpt(model: Shelgon, checkpoint_file_path: str, stage: str):
     save(
             {
                 "model_state_dict": model.state_dict(),
@@ -287,25 +327,26 @@ def _save_ckpt(model: Bagon, checkpoint_file_path: str, stage: str):
             
         )
 
-def checkpoint(stats_train_best: dict, model: Bagon, checkpoint_dir: str, stage: str):
+def checkpoint(stats_train_best: dict, model: Shelgon, checkpoint_dir: str, stage: str):
     
     if stats_train_best["loss_recon_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_loss_recon_{stage}_best.pth", stage)
+        _save_ckpt(model, f"{checkpoint_dir}/Shelgon_ckpt_loss_recon_{stage}_best.pth", stage)
     
-    if stats_train_best["metric_acc_is_best"]:
-        _save_ckpt(model, f"{checkpoint_dir}/bagon_ckpt_metric_acc_{stage}_best.pth", stage)
+    if stats_train_best["acc_recon_is_best"]:
+        _save_ckpt(model, f"{checkpoint_dir}/Shelgon_ckpt_metric_acc_{stage}_best.pth", stage)
 
 
 def train(
     prg: Progress, console: Console,
     device: device, 
     dl_train: DataLoader, dl_val: DataLoader, n_batches_train: int, n_batches_val: int,
-    model: Bagon, 
+    model: Shelgon, 
     tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer, 
     tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int, 
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int, 
     encoder_perturb_train_pct: float, encoder_perturb_val_pct: float,
     decoder_perturb_train_pct: float, decoder_perturb_val_pct: float,
+    num_labels_per_class: int,
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
     n_epochs: int, 
@@ -342,13 +383,14 @@ def train(
             n_els_epoch += n_els_batch
             n_steps += 1
 
-            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, logits_pred, latent_classes_labels = step(
                 device=device,
                 model=model, 
                 tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
                 tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                 tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_train_pct, decoder_perturb_pct=decoder_perturb_train_pct,
+                num_labels_per_class=num_labels_per_class,
                 opt=opt, 
                 lr_sched=lr_sched,
                 batch=batch, 
@@ -397,13 +439,14 @@ def train(
 
             with no_grad():
 
-                stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+                stats_step, input_ids_encoder, input_ids_decoder, recon_ids, logits_pred, latent_classes_labels = step(
                     device=device,
                     model=model, 
                     tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
                     tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                     tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                     encoder_perturb_pct=encoder_perturb_val_pct, decoder_perturb_pct=decoder_perturb_val_pct,
+                    num_labels_per_class=num_labels_per_class,
                     opt=None, 
                     lr_sched=None,
                     batch=batch, 
@@ -443,11 +486,12 @@ def test(
     prg: Progress, console: Console,
     device: device, 
     dl_test: DataLoader, n_batches_test,
-    model: Bagon, 
+    model: Shelgon, 
     tokenizer_encoder: PreTrainedTokenizer, tokenizer_decoder: PreTrainedTokenizer,
     tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_test_pct: float, decoder_perturb_test_pct: float,
+    num_labels_per_class: int,
     decoded_sentences: list,
     vocab_size_encoder: int, vocab_size_decoder: int,
     epoch: int,
@@ -474,13 +518,14 @@ def test(
 
         with no_grad():
 
-            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, latent_classes_labels = step(
+            stats_step, input_ids_encoder, input_ids_decoder, recon_ids, logits_pred, latent_classes_labels = step(
                 device=device,
                 model=model, 
                 tokenizer_encoder=tokenizer_encoder, tokenizer_decoder=tokenizer_decoder,
                 tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                 tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_test_pct, decoder_perturb_pct=decoder_perturb_test_pct,
+                num_labels_per_class=num_labels_per_class,
                 opt=None, 
                 lr_sched=None,
                 batch=batch, 

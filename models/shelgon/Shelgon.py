@@ -16,6 +16,8 @@ class Shelgon(nn.Module):
     def __init__(
         self, 
         encoder_model_name: str, 
+        emb_size: int, seq_len: int,
+        num_latent_classes: int, num_labels_per_class: int, 
         decoder_model_name: str
     ):
         super(Shelgon, self).__init__()
@@ -33,6 +35,16 @@ class Shelgon(nn.Module):
 
         self.decoder_model_name = decoder_model_name
 
+        self.proj_in = nn.Sequential(
+            nn.Linear(in_features=emb_size, out_features=num_labels_per_class),
+            nn.Conv1d(in_channels=seq_len, out_channels=num_latent_classes, kernel_size=1)
+        )
+
+        self.proj_out = nn.Sequential(
+            nn.Conv1d(in_channels=num_latent_classes, out_channels=seq_len, kernel_size=1),
+            nn.Linear(in_features=num_labels_per_class, out_features=emb_size)
+        )
+
 
     def forward(
         self, 
@@ -44,12 +56,16 @@ class Shelgon(nn.Module):
             encoder_input_ids, attention_mask=encoder_attention_mask
         ).last_hidden_state
 
+        pred_latent_classes = self.proj_in(encoder_output)
+
+        decoder_input_conditioning = self.proj_out(pred_latent_classes)
+
         reconstructed_logits = self.decoder(
-            encoder_hidden_states=encoder_output, 
+            encoder_hidden_states=decoder_input_conditioning, 
             input_ids=decoder_input_ids, attention_mask=decoder_attention_mask
         ).logits
 
-        return reconstructed_logits
+        return reconstructed_logits, pred_latent_classes
     
 
     def model_params_summary_dict(self):
@@ -58,6 +74,18 @@ class Shelgon(nn.Module):
                 "n_trainable_params": n_trainable_params(self.encoder),
                 "n_not_trainable_params": n_not_trainable_params(self.encoder),
                 "n_params": n_params(self.encoder)
+            },
+            
+            "enc to latent labels": {
+                "n_trainable_params": n_trainable_params(self.proj_in),
+                "n_not_trainable_params": n_not_trainable_params(self.proj_in),
+                "n_params": n_params(self.proj_in)
+            },
+            
+            "latent labels to dec": {
+                "n_trainable_params": n_trainable_params(self.proj_out),
+                "n_not_trainable_params": n_not_trainable_params(self.proj_out),
+                "n_params": n_params(self.proj_out)
             },
             
             "decoder": {
@@ -72,6 +100,14 @@ class Shelgon(nn.Module):
 
         print_module_params_summary(
             self.encoder, "Encoder", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
+        )
+        
+        print_module_params_summary(
+            self.proj_in, "Encoder to latent labels", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
+        )
+        
+        print_module_params_summary(
+            self.proj_out, "Latent labels to decoder", COLOR_TRAIN, COLOR_FROZEN, COLOR_TOT
         )
         
         print_module_params_summary(
@@ -186,9 +222,18 @@ def main():
     from torch.nn.functional import softmax
 
     encoder_model_name = "bert-base-uncased"
+    emb_size = 768
+    seq_len = 14
+    num_latent_classes = 5
+    num_labels_per_class = 3
     decoder_model_name = "bert-base-uncased"
 
-    model = Shelgon(encoder_model_name, decoder_model_name)
+    model = Shelgon(
+        encoder_model_name, 
+        emb_size, seq_len,
+        num_latent_classes, num_labels_per_class,
+        decoder_model_name
+    )
 
     tokenizer_name = "bert-base-uncased"
     tokenizer: BertTokenizerFast = BertTokenizerFast.from_pretrained(tokenizer_name)
@@ -199,11 +244,13 @@ def main():
         "I am totally ready for this great adventure"
     ]
     
-    tokenized = tokenizer(text, return_tensors="pt", padding=True)
+    tokenized = tokenizer(
+        text, return_tensors="pt", padding="max_length", max_length=seq_len
+    )
     input_ids = tokenized.input_ids
     attention_mask = tokenized.attention_mask
 
-    recon_logits = model.forward(
+    recon_logits, pred_labels = model.forward(
         encoder_input_ids=input_ids, encoder_attention_mask=attention_mask,
         decoder_input_ids=input_ids, decoder_attention_mask=attention_mask
     )
