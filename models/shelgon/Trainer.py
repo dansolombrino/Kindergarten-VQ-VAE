@@ -41,7 +41,7 @@ from wandb.wandb_run import Run
 
 from torch import save
 
-from common.tensor_utils import replace_pct_rand_values
+from common.tensor_utils import replace_pct_rand_values, change_percentage_of_elements
 
 def count_pct_padding_tokens(input_ids: Tensor, console: Console):
 
@@ -88,7 +88,10 @@ def step(
         add_special_tokens=tokenizer_encoder_add_special_tokens
     )
     input_ids_encoder: Tensor = tokenized_encoder.input_ids.to(device)
-    input_ids_encoder = replace_pct_rand_values(input_ids_encoder, encoder_perturb_pct, 0, vocab_size_encoder)
+    # input_ids_encoder = replace_pct_rand_values(input_ids_encoder, encoder_perturb_pct, 0, vocab_size_encoder)
+    input_ids_encoder_perturbed = change_percentage_of_elements(
+        input_ids_encoder, 1, encoder_perturb_pct, 0, vocab_size_encoder
+    )
     attention_mask_encoder: Tensor = tokenized_encoder.attention_mask.to(device)
 
     tokenized_decoder = tokenizer_decoder(
@@ -97,13 +100,16 @@ def step(
         add_special_tokens=tokenizer_decoder_add_special_tokens
     )
     input_ids_decoder: Tensor = tokenized_decoder.input_ids.to(device)
-    input_ids_decoder = replace_pct_rand_values(input_ids_decoder, decoder_perturb_pct, 0, vocab_size_decoder)
+    # input_ids_decoder = replace_pct_rand_values(input_ids_decoder, decoder_perturb_pct, 0, vocab_size_decoder)
+    input_ids_decoder_perturbed = change_percentage_of_elements(
+        input_ids_decoder, 1, decoder_perturb_pct, 0, vocab_size_decoder
+    )
     attention_mask_decoder: Tensor = tokenized_decoder.attention_mask.to(device)
     
     logits_recon: Tensor; logits_pred: Tensor
     logits_recon, logits_pred = model.forward(
-        input_ids_encoder, attention_mask_encoder, 
-        input_ids_decoder, attention_mask_decoder
+        input_ids_encoder_perturbed, attention_mask_encoder, 
+        input_ids_decoder_perturbed, attention_mask_decoder
     )
 
     # input and targets reshaped to use KL divergence with sequential data, as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
