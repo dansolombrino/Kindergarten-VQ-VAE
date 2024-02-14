@@ -69,6 +69,7 @@ def step(
     tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_pct: float, decoder_perturb_pct: float,
+    use_mask_encoder: bool, use_mask_decoder: bool,
     num_labels_per_class: int,
     opt: Optimizer, 
     lr_sched: LRScheduler,
@@ -108,8 +109,8 @@ def step(
     
     logits_recon: Tensor; logits_pred: Tensor
     logits_recon, logits_pred = model.forward(
-        input_ids_encoder_perturbed, attention_mask_encoder, 
-        input_ids_decoder_perturbed, attention_mask_decoder
+        input_ids_encoder_perturbed, attention_mask_encoder if use_mask_encoder else None, 
+        input_ids_decoder_perturbed, attention_mask_decoder if use_mask_decoder else None
     )
 
     # input and targets reshaped to use KL divergence with sequential data, as per https://github.com/florianmai/emb2emb/blob/master/autoencoders/autoencoder.py#L116C13-L116C58
@@ -352,6 +353,7 @@ def train(
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int, 
     encoder_perturb_train_pct: float, encoder_perturb_val_pct: float,
     decoder_perturb_train_pct: float, decoder_perturb_val_pct: float,
+    use_mask_encoder: bool, use_mask_decoder: bool,
     num_labels_per_class: int,
     n_epochs_to_decode_after: int, decoded_sentences: list,
     opt: Optimizer, lr_sched: LRScheduler, 
@@ -396,6 +398,7 @@ def train(
                 tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                 tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_train_pct, decoder_perturb_pct=decoder_perturb_train_pct,
+                use_mask_encoder=use_mask_encoder, use_mask_decoder=use_mask_decoder,
                 num_labels_per_class=num_labels_per_class,
                 opt=opt, 
                 lr_sched=lr_sched,
@@ -452,6 +455,7 @@ def train(
                     tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                     tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                     encoder_perturb_pct=encoder_perturb_val_pct, decoder_perturb_pct=decoder_perturb_val_pct,
+                    use_mask_encoder=use_mask_encoder, use_mask_decoder=use_mask_decoder,
                     num_labels_per_class=num_labels_per_class,
                     opt=None, 
                     lr_sched=None,
@@ -497,6 +501,7 @@ def test(
     tokenizer_encoder_add_special_tokens: bool, tokenized_encoder_sentence_max_length: int,
     tokenizer_decoder_add_special_tokens: bool, tokenized_decoder_sentence_max_length: int,
     encoder_perturb_test_pct: float, decoder_perturb_test_pct: float,
+    use_mask_encoder: bool, use_mask_decoder: bool,
     num_labels_per_class: int,
     decoded_sentences: list,
     vocab_size_encoder: int, vocab_size_decoder: int,
@@ -531,6 +536,7 @@ def test(
                 tokenizer_encoder_add_special_tokens=tokenizer_encoder_add_special_tokens, tokenized_encoder_sentence_max_length=tokenized_encoder_sentence_max_length,
                 tokenizer_decoder_add_special_tokens=tokenizer_decoder_add_special_tokens, tokenized_decoder_sentence_max_length=tokenized_decoder_sentence_max_length,
                 encoder_perturb_pct=encoder_perturb_test_pct, decoder_perturb_pct=decoder_perturb_test_pct,
+                use_mask_encoder=use_mask_encoder, use_mask_decoder=use_mask_decoder,
                 num_labels_per_class=num_labels_per_class,
                 opt=None, 
                 lr_sched=None,
