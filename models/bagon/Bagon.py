@@ -16,7 +16,8 @@ class Bagon(nn.Module):
     def __init__(
         self, 
         encoder_model_name: str, 
-        decoder_model_name: str
+        decoder_model_name: str,
+        cross_attn_make_trainable: bool
     ):
         super(Bagon, self).__init__()
 
@@ -32,6 +33,8 @@ class Bagon(nn.Module):
         self.encoder_model_name = encoder_model_name
 
         self.decoder_model_name = decoder_model_name
+
+        self.cross_attn_make_trainable = cross_attn_make_trainable
 
 
     def forward(
@@ -113,6 +116,12 @@ class Bagon(nn.Module):
             for layer in self.decoder.bert.encoder.layer:
 
                 self._module_make_trainable(layer.crossattention, decoder_cross_attn_requires_grad)
+        
+        if "gpt2" in self.decoder_model_name:
+            for layer in self.decoder.transformer.h:
+
+                self._module_make_trainable(layer.crossattention, decoder_cross_attn_requires_grad)
+                self._module_make_trainable(layer.ln_cross_attn, decoder_cross_attn_requires_grad)
 
     def _set_mode_dec_head_ft(self):
         self.model_mode = "dec-head-ft"
@@ -127,7 +136,7 @@ class Bagon(nn.Module):
         # Then, we unfreeze the parameters of the layers we're interested in
         self._decoder_lm_head_make_trainable(True)
 
-        self._decoder_cross_attn_make_trainable(True)
+        self._decoder_cross_attn_make_trainable(self.cross_attn_make_trainable)
 
     
     def _set_mode_enc_head_dec_head_ft(self):

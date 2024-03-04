@@ -55,7 +55,8 @@ def main():
     logging.set_verbosity(40)
     model = Bagon(
         encoder_model_name=ENCODER_MODEL_NAME, 
-        decoder_model_name=DECODER_MODEL_NAME
+        decoder_model_name=DECODER_MODEL_NAME,
+        cross_attn_make_trainable=CROSS_ATTN_MAKE_TRAINABLE
     ).to(device)
     model.compile()
     model.set_mode(MODEL_MODE)
