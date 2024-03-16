@@ -107,8 +107,8 @@ def step(
     )
     attention_mask_decoder: Tensor = tokenized_decoder.attention_mask.to(device)
     
-    logits_recon: Tensor; logits_pred: Tensor
-    logits_recon, logits_pred = model.forward(
+    logits_recon: Tensor; logits_pred: Tensor; classes_pred: Tensor
+    logits_recon, logits_pred, classes_pred = model.forward(
         input_ids_encoder_perturbed, attention_mask_encoder if use_mask_encoder else None, 
         input_ids_decoder_perturbed, attention_mask_decoder if use_mask_decoder else None
     )
@@ -132,7 +132,7 @@ def step(
     acc_recon_step_per_batch, acc_recon_step_per_sentence = seq_acc(recon_ids, input_ids_decoder)
 
     acc_pred_step_per_batch, acc_pred_step_per_sentence = seq_acc(
-        argmax(softmax(logits_pred, dim=-1), dim=-1), gt_labels
+        argmax(classes_pred, dim=-1), gt_labels
     )
 
     # passing opt  --> training time

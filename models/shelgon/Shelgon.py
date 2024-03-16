@@ -9,6 +9,8 @@ from common.consts import *
 
 from common.model_utils import *
 
+from torch.nn.functional import softmax, gumbel_softmax
+
 SUPPORTED_MODEL_MODES = ["full", "dec-head-ft", "enc-head-ft-dec-head-ft"]
 
 
@@ -56,7 +58,8 @@ class Shelgon(nn.Module):
             encoder_input_ids, attention_mask=encoder_attention_mask
         ).last_hidden_state
 
-        pred_latent_classes = self.proj_in(encoder_output)
+        pred_latent_logits = self.proj_in(encoder_output)
+        pred_latent_classes = gumbel_softmax(pred_latent_logits, dim=-1)
 
         decoder_input_conditioning = self.proj_out(pred_latent_classes)
 
@@ -65,7 +68,7 @@ class Shelgon(nn.Module):
             input_ids=decoder_input_ids, attention_mask=decoder_attention_mask
         ).logits
 
-        return reconstructed_logits, pred_latent_classes
+        return reconstructed_logits, pred_latent_logits, pred_latent_classes
     
 
     def model_params_summary_dict(self):
