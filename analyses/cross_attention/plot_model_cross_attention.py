@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 MODEL_NAME = "Shelgon"
 
-RUN_ID = "2024_02_12_09_29_33 - WandB run 4"
+RUN_ID = "2024_02_14_10_57_51 - WandB run 14"
 
 RUN_DIR = f"./runs/{MODEL_NAME}/{RUN_ID}"
 
@@ -30,6 +30,17 @@ os.makedirs(SELF_ATTNS_DIR) if not os.path.exists(SELF_ATTNS_DIR) else None
 cross_attentions = torch.load(f"{RUN_DIR}/cross_attentions_mean_across_batch_size.pth")
 self_attentions = torch.load(f"{RUN_DIR}/attentions_mean_across_batch_size.pth")
 # cross_attns.shape: [num_decoder_layers, num_heads, seq_len, seq_len]
+
+cross_attn: torch.Tensor = cross_attentions
+cross_attn: torch.Tensor = cross_attn.mean(dim=0).mean(dim=0)
+
+cross_attn_plot = seaborn.heatmap(data=cross_attn, vmin=cross_attn.min(), vmax=cross_attn.max(), cmap="viridis")
+cross_attn_plot.set_title(f"Cross attention, avg across {cross_attentions.shape[0]} layers and {cross_attentions.shape[1]} heads")
+cross_attn_plot.set_xlabel("Decoder input tokens")
+cross_attn_plot.set_ylabel("Encoder contidioning tokens")
+fig = cross_attn_plot.get_figure()
+fig.savefig(f"{CROSS_ATTNS_DIR}/layer_AVG_attn_head_AVG.png", dpi=400) 
+fig.clear()
 
 console = Console()
 prg = Progress(
@@ -54,17 +65,31 @@ for layer_idx in range(cross_attentions.shape[0]):
 
     prg.reset(heads_task)
 
+    cross_attn: torch.Tensor = cross_attentions[layer_idx, ...]
+    cross_attn: torch.Tensor = cross_attn.mean(dim=0)
+    
+    cross_attn_plot = seaborn.heatmap(data=cross_attn, vmin=cross_attn.min(), vmax=cross_attn.max(), cmap="viridis")
+    cross_attn_plot.set_title(f"Cross attention for decoder layer {layer_idx}, avg across {cross_attentions.shape[1]} heads")
+    cross_attn_plot.set_xlabel("Decoder input tokens")
+    cross_attn_plot.set_ylabel("Encoder contidioning tokens")
+    fig = cross_attn_plot.get_figure()
+    fig.savefig(f"{CROSS_ATTNS_DIR}/layer_{layer_idx}_attn_head_AVG.png", dpi=400) 
+    fig.clear()
+
     for head_idx in range(cross_attentions.shape[1]):
         cross_attn: Tensor = cross_attentions[layer_idx, head_idx, ...]
 
-        cross_attn_plot = seaborn.heatmap(data=cross_attn, vmin=0, vmax=1, cmap="mako")
+        cross_attn_plot = seaborn.heatmap(data=cross_attn, vmin=cross_attn.min(), vmax=cross_attn.max(), cmap="viridis")
+        cross_attn_plot.set_title(f"Cross attention for decoder layer {layer_idx}, head {head_idx}")
+        cross_attn_plot.set_xlabel("Decoder input tokens")
+        cross_attn_plot.set_ylabel("Encoder contidioning tokens")
         fig = cross_attn_plot.get_figure()
         fig.savefig(f"{CROSS_ATTNS_DIR}/layer_{layer_idx}_attn_head_{head_idx}.png", dpi=400) 
         fig.clear()
         
         self_attn: Tensor = self_attentions[layer_idx, head_idx, ...]
 
-        self_attn_plot = seaborn.heatmap(data=self_attn, vmin=0, vmax=1, cmap="mako")
+        self_attn_plot = seaborn.heatmap(data=self_attn, vmin=self_attn.min(), vmax=self_attn.max(), cmap="viridis")
         fig = self_attn_plot.get_figure()
         fig.savefig(f"{SELF_ATTNS_DIR}/layer_{layer_idx}_attn_head_{head_idx}.png", dpi=400) 
         fig.clear()
