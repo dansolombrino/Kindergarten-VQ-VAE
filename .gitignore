@@ -175,3 +175,5 @@ runs/
 # Analyses results
 **.json
 **.txt
+
+sentences_latent_reps/
